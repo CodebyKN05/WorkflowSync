@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 from app.core.database import Base
 from app.core.config import settings
+import app.models  # Ensure models are registered
 target_metadata = Base.metadata
 
 # Override sqlalchemy.url with the value from our settings
