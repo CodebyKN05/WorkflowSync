@@ -167,6 +167,9 @@ def test_match_invoice_relationship(db_session):
     )
     client.transactions.append(transaction)
     
+    db_session.add(firm)
+    db_session.flush()
+    
     match = Match(
         transaction_id=transaction.id,
         score=Decimal("100.00"),
@@ -175,7 +178,6 @@ def test_match_invoice_relationship(db_session):
     )
     invoice.matches.append(match)
     
-    db_session.add(firm)
     db_session.commit()
     db_session.refresh(invoice)
     db_session.refresh(match)
@@ -208,6 +210,9 @@ def test_match_transaction_relationship(db_session):
     )
     client.transactions.append(transaction)
     
+    db_session.add(firm)
+    db_session.flush()
+    
     match = Match(
         invoice_id=invoice.id,
         score=Decimal("100.00"),
@@ -216,7 +221,6 @@ def test_match_transaction_relationship(db_session):
     )
     transaction.matches.append(match)
     
-    db_session.add(firm)
     db_session.commit()
     db_session.refresh(transaction)
     db_session.refresh(match)
