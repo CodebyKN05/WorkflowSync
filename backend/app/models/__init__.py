@@ -5,3 +5,4 @@ from app.models.invoice import Invoice
 from app.models.transaction import Transaction
 from app.models.match import Match
 from app.models.reconciliation_run import ReconciliationRun
+from app.models.exception import ReconciliationException

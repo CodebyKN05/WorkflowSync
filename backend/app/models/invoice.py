@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.client import Client
     from app.models.match import Match
+    from app.models.exception import ReconciliationException
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -26,3 +27,4 @@ class Invoice(Base):
 
     client: Mapped["Client"] = relationship("Client", back_populates="invoices")
     matches: Mapped[list["Match"]] = relationship("Match", back_populates="invoice")
+    exceptions: Mapped[list["ReconciliationException"]] = relationship("ReconciliationException", back_populates="invoice")
