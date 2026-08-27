@@ -1,5 +1,6 @@
 import pytest
 import uuid
+from typing import cast
 from decimal import Decimal
 from datetime import date
 from sqlalchemy.exc import OperationalError, IntegrityError
@@ -122,5 +123,5 @@ def test_transaction_client_relationship(db_session):
     
     assert transaction.client_id == client.id
     assert transaction.client.id == client.id
-    assert len(client.transactions) == 1  # pyright: ignore[reportArgumentType]
+    assert len(cast(list[Transaction], client.transactions)) == 1
     assert client.transactions[0].id == transaction.id
