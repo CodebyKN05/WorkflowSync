@@ -183,8 +183,8 @@ def test_reconciliation_run_completed_at_update(db_session):
     assert run.completed_at is None
     
     completion_time = datetime.now(timezone.utc)
-    run.completed_at = completion_time
-    run.status = "COMPLETED"
+    setattr(run, "completed_at", completion_time)
+    setattr(run, "status", "COMPLETED")
     
     db_session.commit()
     db_session.refresh(run)
