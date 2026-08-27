@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.client import Client
+    from app.models.match import Match
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -24,3 +25,4 @@ class Invoice(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     client: Mapped["Client"] = relationship("Client", back_populates="invoices")
+    matches: Mapped[list["Match"]] = relationship("Match", back_populates="invoice")

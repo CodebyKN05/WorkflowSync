@@ -6,7 +6,9 @@ from app.core.database import Base
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from app.models.firm import Firm
     from app.models.client import Client
+    from app.models.match import Match
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -22,3 +24,4 @@ class Transaction(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     client: Mapped["Client"] = relationship("Client", back_populates="transactions")
+    matches: Mapped[list["Match"]] = relationship("Match", back_populates="transaction")
