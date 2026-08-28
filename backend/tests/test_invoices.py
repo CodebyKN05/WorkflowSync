@@ -41,9 +41,15 @@ def db_session(setup_database):
 def test_client():
     return TestClient(app)
 
-def create_valid_pdf_bytes():
+def create_pdf_with_text(text_list: list[str] = None) -> bytes:
     doc = fitz.open()
-    doc.new_page()
+    if not text_list:
+        doc.new_page()
+    else:
+        for text in text_list:
+            page = doc.new_page()
+            if text:
+                page.insert_text(fitz.Point(50, 50), text)
     pdf_bytes = doc.write()
     doc.close()
     return pdf_bytes
@@ -76,7 +82,7 @@ def test_invoice_upload_authenticated_and_authorized(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    valid_pdf_bytes = create_valid_pdf_bytes()
+    valid_pdf_bytes = create_pdf_with_text(["Test Invoice Data"])
 
     response = test_client.post(
         "/api/v1/invoices/upload",
@@ -89,7 +95,8 @@ def test_invoice_upload_authenticated_and_authorized(test_client, db_session):
     data = response.json()
     assert data["filename"] == "invoice123.pdf"
     assert data["content_type"] == "application/pdf"
-    assert data["message"] == "Invoice upload received"
+    assert data["message"] == "Invoice upload and extraction successful"
+    assert "Test Invoice Data" in data["extracted_text"]
 
 def test_invoice_upload_unauthorized_firm(test_client, db_session):
     firm1 = Firm(name="My Firm")
@@ -103,7 +110,7 @@ def test_invoice_upload_unauthorized_firm(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    valid_pdf_bytes = create_valid_pdf_bytes()
+    valid_pdf_bytes = create_pdf_with_text()
 
     response = test_client.post(
         "/api/v1/invoices/upload",
@@ -124,7 +131,7 @@ def test_invoice_upload_client_not_found(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    valid_pdf_bytes = create_valid_pdf_bytes()
+    valid_pdf_bytes = create_pdf_with_text()
 
     response = test_client.post(
         "/api/v1/invoices/upload",
@@ -206,3 +213,53 @@ def test_invoice_upload_oversized(test_client, db_session):
 
     assert response.status_code == 413
     assert "File too large" in response.json()["detail"]
+
+def test_invoice_upload_multi_page_text(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_multi@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+    valid_pdf_bytes = create_pdf_with_text(["Page 1 Text", "Page 2 Text", "Page 3 Text"])
+
+    response = test_client.post(
+        "/api/v1/invoices/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"client_id": str(client.id)},
+        files={"file": ("invoice_multi.pdf", valid_pdf_bytes, "application/pdf")}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "Page 1 Text" in data["extracted_text"]
+    assert "Page 2 Text" in data["extracted_text"]
+    assert "Page 3 Text" in data["extracted_text"]
+
+def test_invoice_upload_empty_pdf(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_empty@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+    valid_pdf_bytes = create_pdf_with_text() # Creates an empty page
+
+    response = test_client.post(
+        "/api/v1/invoices/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"client_id": str(client.id)},
+        files={"file": ("invoice_empty.pdf", valid_pdf_bytes, "application/pdf")}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["extracted_text"] == ""

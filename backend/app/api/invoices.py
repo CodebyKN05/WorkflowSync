@@ -26,7 +26,7 @@ def upload_invoice(
             detail="Client not found"
         )
         
-    if client.firm_id != current_user.firm_id:
+    if client.firm_id != current_user.firm_id:  # pyright: ignore[reportGeneralTypeIssues]
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this client"
@@ -48,15 +48,30 @@ def upload_invoice(
         
     try:
         doc = fitz.open(stream=content, filetype="pdf")
-        doc.close()
     except Exception:
         raise AppException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Corrupt or invalid PDF file."
         )
         
+    extracted_text = ""
+    try:
+        for page in doc:
+            text = page.get_text("text")
+            if isinstance(text, str):
+                extracted_text += text + "\n"
+    except Exception:
+        doc.close()
+        raise AppException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Failed to extract text from PDF."
+        )
+    finally:
+        doc.close()
+
     return {
         "filename": file.filename,
         "content_type": file.content_type,
-        "message": "Invoice upload received"
+        "message": "Invoice upload and extraction successful",
+        "extracted_text": extracted_text.strip()
     }
