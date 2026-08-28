@@ -10,3 +10,4 @@ pymupdf
 PyJWT
 bcrypt
 email-validator
+python-multipart
