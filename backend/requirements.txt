@@ -7,3 +7,6 @@ psycopg2-binary
 alembic
 pydantic-settings
 pymupdf
+PyJWT
+bcrypt
+email-validator
