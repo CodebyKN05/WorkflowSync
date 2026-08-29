@@ -6,6 +6,8 @@ from app.models.user import User
 from app.models.client import Client
 from app.core.exceptions import AppException
 from app.core.config import settings
+from app.services.transaction_parser import parse_transaction_csv
+from app.services.transaction_validator import validate_parsed_transactions
 
 router = APIRouter()
 
@@ -44,6 +46,10 @@ def upload_transaction_csv(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Unsupported file format. Only CSV files are allowed."
         )
+
+    csv_text = content.decode("utf-8-sig", errors="replace")
+    parsed_rows = parse_transaction_csv(csv_text)
+    validate_parsed_transactions(parsed_rows)
 
     return {
         "filename": file.filename,

@@ -50,7 +50,7 @@ def test_transaction_csv_upload_authenticated_and_authorized(test_client, db_ses
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    csv_bytes = b"Date,Description,Amount\n2023-01-01,Test,-100.00"
+    csv_bytes = b"Date,Description,Amount,Currency\n2023-01-01,Test,-100.00,USD"
 
     response = test_client.post(
         "/api/v1/transactions/upload",
@@ -73,7 +73,7 @@ def test_transaction_csv_upload_unauthenticated(test_client, db_session):
     db_session.add(client)
     db_session.commit()
 
-    csv_bytes = b"Date,Description,Amount\n2023-01-01,Test,-100.00"
+    csv_bytes = b"Date,Description,Amount,Currency\n2023-01-01,Test,-100.00,USD"
 
     response = test_client.post(
         "/api/v1/transactions/upload",
@@ -91,7 +91,7 @@ def test_transaction_csv_upload_invalid_jwt(test_client, db_session):
     db_session.add(client)
     db_session.commit()
 
-    csv_bytes = b"Date,Description,Amount\n2023-01-01,Test,-100.00"
+    csv_bytes = b"Date,Description,Amount,Currency\n2023-01-01,Test,-100.00,USD"
 
     response = test_client.post(
         "/api/v1/transactions/upload",
@@ -112,7 +112,7 @@ def test_transaction_csv_upload_client_not_found(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    csv_bytes = b"Date,Description,Amount\n2023-01-01,Test,-100.00"
+    csv_bytes = b"Date,Description,Amount,Currency\n2023-01-01,Test,-100.00,USD"
     random_client_id = str(uuid.uuid4())
 
     response = test_client.post(
@@ -137,7 +137,7 @@ def test_transaction_csv_upload_unauthorized_firm(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user1.id)})
-    csv_bytes = b"Date,Description,Amount\n2023-01-01,Test,-100.00"
+    csv_bytes = b"Date,Description,Amount,Currency\n2023-01-01,Test,-100.00,USD"
 
     response = test_client.post(
         "/api/v1/transactions/upload",
