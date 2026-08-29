@@ -1,3 +1,4 @@
+import uuid
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -10,3 +11,12 @@ class InvoiceExtractedData(BaseModel):
     due_date: Optional[date] = None
     total: Optional[Decimal] = None
     currency: Optional[str] = None
+
+class InvoiceUploadResponse(BaseModel):
+    id: uuid.UUID
+    filename: str
+    content_type: str
+    message: str
+    extracted_text: str
+    extracted_data: InvoiceExtractedData
+    status: str

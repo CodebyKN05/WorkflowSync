@@ -19,7 +19,7 @@ def setup_database():
             pass
     except OperationalError as e:
         pytest.skip(f"Could not connect to PostgreSQL. Assuming local DB is not running. Error: {e}")
-        
+
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
@@ -82,7 +82,13 @@ def test_invoice_upload_authenticated_and_authorized(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    valid_pdf_bytes = create_pdf_with_text(["Test Invoice Data"])
+    valid_pdf_bytes = create_pdf_with_text(["""
+    Invoice No: 12345
+    Vendor: Acme Corp
+    Date: 2023-10-01
+    Due Date: 2023-10-15
+    Total: $1000.00
+    """])
 
     response = test_client.post(
         "/api/v1/invoices/upload",
@@ -95,9 +101,53 @@ def test_invoice_upload_authenticated_and_authorized(test_client, db_session):
     data = response.json()
     assert data["filename"] == "invoice123.pdf"
     assert data["content_type"] == "application/pdf"
-    assert data["message"] == "Invoice upload and extraction successful"
-    assert "Test Invoice Data" in data["extracted_text"]
+    assert "message" in data
+    assert "Acme Corp" in data["extracted_text"]
+    assert "id" in data
+    assert "status" in data
     assert "extracted_data" in data
+
+    from app.models.invoice import Invoice
+    invoice = db_session.query(Invoice).filter(Invoice.id == data["id"]).first()
+    assert invoice is not None
+    assert str(invoice.client_id) == str(client.id)
+    assert invoice.invoice_number == "12345"
+    assert invoice.vendor == "Acme Corp"
+    assert str(invoice.invoice_date) == "2023-10-01"
+    assert str(invoice.due_date) == "2023-10-15"
+    assert str(invoice.amount) == "1000.00"
+    assert invoice.currency == "USD"
+
+def test_invoice_upload_missing_required_fields(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_missing@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+    invalid_pdf_bytes = create_pdf_with_text(["""
+    Invoice No: 12345
+    Vendor: Acme Corp
+    """])
+
+    response = test_client.post(
+        "/api/v1/invoices/upload",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"client_id": str(client.id)},
+        files={"file": ("invoice123.pdf", invalid_pdf_bytes, "application/pdf")}
+    )
+
+    assert response.status_code == 422
+    assert "invoice_date" in response.json()["detail"]
+    assert "amount" in response.json()["detail"]
+
+    from app.models.invoice import Invoice
+    count = db_session.query(Invoice).filter(Invoice.client_id == client.id).count()
+    assert count == 0
 
 def test_invoice_upload_unauthorized_firm(test_client, db_session):
     firm1 = Firm(name="My Firm")
@@ -177,7 +227,7 @@ def test_invoice_upload_corrupt_pdf(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    
+
     # Has %PDF- but is corrupt
     corrupt_pdf_bytes = b"%PDF-1.4\n% this is corrupt\nand will fail fitz open"
 
@@ -202,7 +252,7 @@ def test_invoice_upload_oversized(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    
+
     oversized_bytes = b"%PDF-1.4\n" + (b"0" * settings.MAX_UPLOAD_SIZE_BYTES)
 
     response = test_client.post(
@@ -226,7 +276,11 @@ def test_invoice_upload_multi_page_text(test_client, db_session):
     db_session.commit()
 
     token = create_access_token(data={"sub": str(user.id)})
-    valid_pdf_bytes = create_pdf_with_text(["Page 1 Text", "Page 2 Text", "Page 3 Text"])
+    valid_pdf_bytes = create_pdf_with_text([
+        "Invoice No: 999\nVendor: Multi Corp",
+        "Date: 2024-01-01\nDue Date: 2024-02-01",
+        "Total: $500.00"
+    ])
 
     response = test_client.post(
         "/api/v1/invoices/upload",
@@ -237,9 +291,9 @@ def test_invoice_upload_multi_page_text(test_client, db_session):
 
     assert response.status_code == 200
     data = response.json()
-    assert "Page 1 Text" in data["extracted_text"]
-    assert "Page 2 Text" in data["extracted_text"]
-    assert "Page 3 Text" in data["extracted_text"]
+    assert "Multi Corp" in data["extracted_text"]
+    assert "2024-01-01" in data["extracted_text"]
+    assert "$500.00" in data["extracted_text"]
 
 def test_invoice_upload_empty_pdf(test_client, db_session):
     firm = Firm(name="Test Firm")
@@ -261,6 +315,5 @@ def test_invoice_upload_empty_pdf(test_client, db_session):
         files={"file": ("invoice_empty.pdf", valid_pdf_bytes, "application/pdf")}
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["extracted_text"] == ""
+    assert response.status_code == 422
+    assert "invoice_number" in response.json()["detail"]
