@@ -64,7 +64,6 @@ def upload_invoice(
             if isinstance(text, str):
                 extracted_text += text + "\n"
     except Exception:
-        doc.close()
         raise AppException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Failed to extract text from PDF."

@@ -2,6 +2,7 @@ import pytest
 import uuid
 import json
 import fitz
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from app.main import app
 from app.models.firm import Firm
@@ -317,3 +318,69 @@ def test_invoice_upload_empty_pdf(test_client, db_session):
 
     assert response.status_code == 422
     assert "invoice_number" in response.json()["detail"]
+
+from unittest.mock import patch
+from sqlalchemy.orm import Session
+
+def test_invoice_upload_persistence_failure(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_db_fail@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+    valid_pdf_bytes = create_pdf_with_text(["""
+    Invoice No: 12345
+    Vendor: Acme Corp
+    Date: 2023-10-01
+    Due Date: 2023-10-15
+    Total: $1000.00
+    """])
+
+    with patch.object(Session, 'commit', side_effect=Exception("Simulated DB failure")):
+        response = test_client.post(
+            "/api/v1/invoices/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"client_id": str(client.id)},
+            files={"file": ("invoice123.pdf", valid_pdf_bytes, "application/pdf")}
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to persist invoice to database."
+    
+    from app.models.invoice import Invoice
+    count = db_session.query(Invoice).filter(Invoice.client_id == client.id).count()
+    assert count == 0
+
+def test_invoice_upload_extraction_failure(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_extract_fail@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+    valid_pdf_bytes = create_pdf_with_text(["Valid content that will fail anyway"])
+
+    # Patch fitz.Page.get_text to raise an exception
+    with patch('fitz.Page.get_text', side_effect=Exception("Simulated extraction failure")):
+        response = test_client.post(
+            "/api/v1/invoices/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            data={"client_id": str(client.id)},
+            files={"file": ("invoice123.pdf", valid_pdf_bytes, "application/pdf")}
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Failed to extract text from PDF."
+    
+    from app.models.invoice import Invoice
+    count = db_session.query(Invoice).filter(Invoice.client_id == client.id).count()
+    assert count == 0
