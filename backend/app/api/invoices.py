@@ -7,6 +7,7 @@ from app.models.user import User
 from app.models.client import Client
 from app.core.exceptions import AppException
 from app.core.config import settings
+from app.services.invoice_parser import parse_invoice_text
 
 router = APIRouter()
 
@@ -69,9 +70,13 @@ def upload_invoice(
     finally:
         doc.close()
 
+    extracted_text = extracted_text.strip()
+    extracted_data = parse_invoice_text(extracted_text)
+
     return {
         "filename": file.filename,
         "content_type": file.content_type,
         "message": "Invoice upload and extraction successful",
-        "extracted_text": extracted_text.strip()
+        "extracted_text": extracted_text,
+        "extracted_data": extracted_data.model_dump()
     }

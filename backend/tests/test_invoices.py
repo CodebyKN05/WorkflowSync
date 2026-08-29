@@ -41,7 +41,7 @@ def db_session(setup_database):
 def test_client():
     return TestClient(app)
 
-def create_pdf_with_text(text_list: list[str] = None) -> bytes:
+def create_pdf_with_text(text_list: list[str] | None = None) -> bytes:
     doc = fitz.open()
     if not text_list:
         doc.new_page()
@@ -97,6 +97,7 @@ def test_invoice_upload_authenticated_and_authorized(test_client, db_session):
     assert data["content_type"] == "application/pdf"
     assert data["message"] == "Invoice upload and extraction successful"
     assert "Test Invoice Data" in data["extracted_text"]
+    assert "extracted_data" in data
 
 def test_invoice_upload_unauthorized_firm(test_client, db_session):
     firm1 = Firm(name="My Firm")
