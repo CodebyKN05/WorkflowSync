@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.invoice import Invoice
     from app.models.transaction import Transaction
+    from app.models.reconciliation_run import ReconciliationRun
 
 class Match(Base):
     __tablename__ = "matches"
 
     id = Column(Uuid, primary_key=True, index=True, default=uuid.uuid4)
+    reconciliation_run_id = Column(Uuid, ForeignKey("reconciliation_runs.id"), nullable=False)
     invoice_id = Column(Uuid, ForeignKey("invoices.id"), nullable=False)
     transaction_id = Column(Uuid, ForeignKey("transactions.id"), nullable=False)
     score = Column(Numeric(5, 2), nullable=False)
@@ -21,5 +23,6 @@ class Match(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    reconciliation_run: Mapped["ReconciliationRun"] = relationship("ReconciliationRun", back_populates="matches")
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="matches")
     transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="matches")

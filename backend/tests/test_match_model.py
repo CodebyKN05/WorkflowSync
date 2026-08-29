@@ -9,6 +9,7 @@ from app.models.firm import Firm
 from app.models.client import Client
 from app.models.invoice import Invoice
 from app.models.transaction import Transaction
+from app.models.reconciliation_run import ReconciliationRun
 from app.models.match import Match
 
 @pytest.fixture(scope="module")
@@ -35,6 +36,7 @@ def test_match_metadata():
     
     columns = {c.name: c for c in Match.__table__.columns}
     assert "id" in columns
+    assert "reconciliation_run_id" in columns
     assert "invoice_id" in columns
     assert "transaction_id" in columns
     assert "score" in columns
@@ -68,9 +70,14 @@ def test_match_construction_and_persistence(db_session):
     client.transactions.append(transaction)
     
     db_session.add(firm)
+    db_session.flush()
+    
+    run = ReconciliationRun(client_id=client.id, status="completed")
+    db_session.add(run)
     db_session.commit()
     
     match = Match(
+        reconciliation_run_id=run.id,
         invoice_id=invoice.id,
         transaction_id=transaction.id,
         score=Decimal("95.50"),
@@ -83,6 +90,7 @@ def test_match_construction_and_persistence(db_session):
     db_session.refresh(match)
     
     assert isinstance(match.id, uuid.UUID)
+    assert match.reconciliation_run_id == run.id
     assert match.invoice_id == invoice.id
     assert match.transaction_id == transaction.id
     assert match.score == Decimal("95.50")
@@ -94,6 +102,7 @@ def test_match_construction_and_persistence(db_session):
     assert match.transaction.id == transaction.id
 
 @pytest.mark.parametrize("missing_field", [
+    "reconciliation_run_id",
     "invoice_id",
     "transaction_id",
     "score",
@@ -124,9 +133,14 @@ def test_match_requires_fields(db_session, missing_field):
     client.transactions.append(transaction)
     
     db_session.add(firm)
+    db_session.flush()
+    
+    run = ReconciliationRun(client_id=client.id, status="completed")
+    db_session.add(run)
     db_session.commit()
     
     match_data = {
+        "reconciliation_run_id": run.id,
         "invoice_id": invoice.id,
         "transaction_id": transaction.id,
         "score": Decimal("95.50"),
@@ -170,7 +184,12 @@ def test_match_invoice_relationship(db_session):
     db_session.add(firm)
     db_session.flush()
     
+    run = ReconciliationRun(client_id=client.id, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    
     match = Match(
+        reconciliation_run_id=run.id,
         transaction_id=transaction.id,
         score=Decimal("100.00"),
         status="CONFIRMED",
@@ -213,7 +232,12 @@ def test_match_transaction_relationship(db_session):
     db_session.add(firm)
     db_session.flush()
     
+    run = ReconciliationRun(client_id=client.id, status="completed")
+    db_session.add(run)
+    db_session.flush()
+    
     match = Match(
+        reconciliation_run_id=run.id,
         invoice_id=invoice.id,
         score=Decimal("100.00"),
         status="CONFIRMED",

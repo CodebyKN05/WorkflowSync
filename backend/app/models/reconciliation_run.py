@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.client import Client
+    from app.models.match import Match
 
 class ReconciliationRun(Base):
     __tablename__ = "reconciliation_runs"
@@ -22,3 +23,4 @@ class ReconciliationRun(Base):
     status = Column(String, nullable=False)
 
     client: Mapped["Client"] = relationship("Client", back_populates="reconciliation_runs")
+    matches: Mapped[list["Match"]] = relationship("Match", back_populates="reconciliation_run")
