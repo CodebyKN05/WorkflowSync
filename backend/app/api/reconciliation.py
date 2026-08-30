@@ -47,3 +47,65 @@ def get_review_queue(
     )
     
     return matches
+
+from datetime import datetime, timezone
+
+@router.post("/matches/{match_id}/confirm", response_model=ReviewCandidateResponse)
+def confirm_match(
+    match_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Confirms a candidate match, transitioning it to MATCHED status.
+    Idempotent if the match is already MATCHED.
+    Adjusts the parent ReconciliationRun counts atomically.
+    """
+    # 1. Fetch match with related entities
+    match = db.query(Match).filter(Match.id == match_id).first()
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Match not found"
+        )
+        
+    # 2. Enforce client isolation
+    invoice = match.invoice
+    client = db.query(Client).filter(Client.id == invoice.client_id).first()
+    if not client or client.firm_id != current_user.firm_id:  # pyright: ignore[reportGeneralTypeIssues]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this match"
+        )
+        
+    # 3. Handle idempotency
+    if match.status == "MATCHED":
+        return match
+        
+    # 4. Atomic update of Match and ReconciliationRun
+    previous_status = match.status
+    match.status = "MATCHED"
+    match.updated_at = datetime.now(timezone.utc)
+    
+    # We must lock the run record to avoid race conditions when updating counts
+    run = db.query(ReconciliationRun).filter(ReconciliationRun.id == match.reconciliation_run_id).with_for_update().first()
+    if run:
+        run.matched_count += 1
+        if previous_status == "NEEDS_REVIEW":
+            run.review_count -= 1
+        elif previous_status == "DUPLICATE":
+            run.duplicate_count -= 1
+        elif previous_status == "UNMATCHED":
+            run.unmatched_count -= 1
+            
+    try:
+        db.commit()
+        db.refresh(match)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to confirm match"
+        )
+    
+    return match

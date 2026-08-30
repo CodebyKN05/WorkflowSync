@@ -216,3 +216,125 @@ def test_get_review_queue_unauthenticated(test_client: TestClient, api_base_data
     run = api_base_data["run"]
     response = test_client.get(f"/api/v1/reconciliation/runs/{run.id}/queue")
     assert response.status_code == 401
+
+def test_confirm_match_success(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_review = api_base_data["match_review"]
+    
+    # Store initial counts
+    initial_matched = run.matched_count
+    initial_review = run.review_count
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert data["status"] == "MATCHED"
+    assert data["id"] == str(match_review.id)
+    
+    # Verify DB update and counts
+    db_session.refresh(match_review)
+    db_session.refresh(run)
+    assert match_review.status == "MATCHED"
+    assert run.matched_count == initial_matched + 1
+    assert run.review_count == initial_review - 1
+
+def test_confirm_match_duplicate_and_siblings_unchanged(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_duplicate = api_base_data["match_duplicate"] # This is match3
+    
+    # Get sibling candidate (match4)
+    sibling = db_session.query(Match).filter(
+        Match.invoice_id == match_duplicate.invoice_id,
+        Match.id != match_duplicate.id,
+        Match.status == "DUPLICATE"
+    ).first()
+    
+    assert sibling is not None
+    
+    initial_matched = run.matched_count
+    initial_duplicate = run.duplicate_count
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{match_duplicate.id}/confirm", headers=headers)
+    assert response.status_code == 200
+    
+    # Verify DB update and counts
+    db_session.refresh(match_duplicate)
+    db_session.refresh(sibling)
+    db_session.refresh(run)
+    
+    assert match_duplicate.status == "MATCHED"
+    assert sibling.status == "DUPLICATE" # Sibling unchanged
+    assert run.matched_count == initial_matched + 1
+    assert run.duplicate_count == initial_duplicate - 1
+
+def test_confirm_match_idempotent(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_matched = api_base_data["match_matched"]
+    
+    initial_matched = run.matched_count
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{match_matched.id}/confirm", headers=headers)
+    assert response.status_code == 200
+    
+    db_session.refresh(run)
+    db_session.refresh(match_matched)
+    
+    assert match_matched.status == "MATCHED"
+    assert run.matched_count == initial_matched # Count unchanged
+
+def test_confirm_match_not_found(test_client: TestClient, auth_headers: tuple):
+    headers, _ = auth_headers
+    random_id = str(uuid.uuid4())
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{random_id}/confirm", headers=headers)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Match not found"
+
+def test_confirm_match_cross_firm_isolation(test_client: TestClient, db_session: Session, api_base_data: dict):
+    firm2 = Firm(name="Other Firm 2")
+    db_session.add(firm2)
+    db_session.flush()
+
+    user2 = User(name="Other User 2", email="other2@firm.com", password_hash="hash", firm_id=firm2.id)
+    db_session.add(user2)
+    db_session.commit()
+
+    token2 = create_access_token(data={"sub": str(user2.id)})
+    headers2 = {"Authorization": f"Bearer {token2}"}
+    
+    match_review = api_base_data["match_review"]
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers2)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Not authorized to access this match"
+
+def test_confirm_match_transaction_rollback(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple, monkeypatch):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_review = api_base_data["match_review"]
+    
+    initial_matched = run.matched_count
+    initial_review = run.review_count
+    
+    # Mock commit to fail
+    import sqlalchemy.orm
+    def mock_commit(*args, **kwargs):
+        raise Exception("DB Error")
+    monkeypatch.setattr(sqlalchemy.orm.Session, 'commit', mock_commit)
+    
+    response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers)
+    assert response.status_code == 500
+    
+    # Use a new session to verify the rollback worked
+    new_session = SessionLocal()
+    run_db = new_session.query(ReconciliationRun).get(run.id)
+    match_db = new_session.query(Match).get(match_review.id)
+    
+    assert match_db.status == "NEEDS_REVIEW"
+    assert run_db.matched_count == initial_matched
+    assert run_db.review_count == initial_review
+    new_session.close()
