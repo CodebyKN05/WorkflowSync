@@ -63,7 +63,7 @@ def auth_headers(db_session: Session):
 @pytest.fixture
 def api_base_data(db_session: Session, auth_headers):
     _, user = auth_headers
-    
+
     client = Client(name="API Client", industry="Tech", currency="USD", firm_id=user.firm_id)
     db_session.add(client)
     db_session.flush()
@@ -78,14 +78,14 @@ def api_base_data(db_session: Session, auth_headers):
     )
     db_session.add(run)
     db_session.flush()
-    
+
     invoice = Invoice(client_id=client.id, invoice_number="INV-API", vendor="API Vendor", invoice_date=date(2023, 1, 1), due_date=date(2023, 1, 31), amount=Decimal("100.00"), currency="USD")
     transaction = Transaction(client_id=client.id, transaction_date=date(2023, 1, 5), description="API Vendor", amount=Decimal("-100.00"), currency="USD", reference="REF-123")
     transaction2 = Transaction(client_id=client.id, transaction_date=date(2023, 1, 5), description="API Vendor 2", amount=Decimal("-100.00"), currency="USD", reference="REF-456")
-    
+
     db_session.add_all([invoice, transaction, transaction2])
     db_session.flush()
-    
+
     # Matched
     match1 = Match(
         reconciliation_run_id=run.id,
@@ -95,7 +95,7 @@ def api_base_data(db_session: Session, auth_headers):
         status="MATCHED",
         reason="Good"
     )
-    
+
     # Needs Review
     invoice_review = Invoice(client_id=client.id, invoice_number="INV-REV", vendor="Review Vendor", invoice_date=date(2023, 1, 1), due_date=date(2023, 1, 31), amount=Decimal("200.00"), currency="USD")
     transaction_review = Transaction(client_id=client.id, transaction_date=date(2023, 1, 5), description="Review Vendor", amount=Decimal("-200.00"), currency="USD", reference="REF-REV")
@@ -110,7 +110,7 @@ def api_base_data(db_session: Session, auth_headers):
         status="NEEDS_REVIEW",
         reason="Check vendor"
     )
-    
+
     # Duplicate (2 candidates for the same invoice)
     match3 = Match(
         reconciliation_run_id=run.id,
@@ -120,7 +120,7 @@ def api_base_data(db_session: Session, auth_headers):
         status="DUPLICATE",
         reason="Duplicate candidate 1"
     )
-    
+
     match4 = Match(
         reconciliation_run_id=run.id,
         invoice_id=invoice.id,
@@ -129,10 +129,10 @@ def api_base_data(db_session: Session, auth_headers):
         status="DUPLICATE",
         reason="Duplicate candidate 2"
     )
-    
+
     db_session.add_all([match1, match2, match3, match4])
     db_session.commit()
-    
+
     return {
         "client": client,
         "run": run,
@@ -147,18 +147,18 @@ def api_base_data(db_session: Session, auth_headers):
 def test_get_review_queue_success(test_client: TestClient, api_base_data: dict, auth_headers: tuple):
     headers, _ = auth_headers
     run = api_base_data["run"]
-    
+
     response = test_client.get(f"/api/v1/reconciliation/runs/{run.id}/queue", headers=headers)
     assert response.status_code == 200
-    
+
     data = response.json()
     assert len(data) == 3  # 1 NEEDS_REVIEW and 2 DUPLICATE
-    
+
     statuses = [m["status"] for m in data]
     assert "NEEDS_REVIEW" in statuses
     assert "DUPLICATE" in statuses
     assert "MATCHED" not in statuses
-    
+
     # Verify explicitly required fields for Candidate Display
     review_match = next(m for m in data if m["status"] == "NEEDS_REVIEW")
     assert review_match["score"] == "75.00"
@@ -168,15 +168,15 @@ def test_get_review_queue_success(test_client: TestClient, api_base_data: dict, 
     assert review_match["transaction"]["description"] == "Review Vendor"
     assert review_match["transaction"]["amount"] == "-200.00"
     assert review_match["transaction"]["reference"] == "REF-REV"
-    
+
     # Verify multiple candidates for the same invoice are correctly represented
     duplicate_matches = [m for m in data if m["status"] == "DUPLICATE"]
     assert len(duplicate_matches) == 2
-    
+
     # Both duplicates should have the same invoice ID and number
     assert duplicate_matches[0]["invoice"]["id"] == duplicate_matches[1]["invoice"]["id"]
     assert duplicate_matches[0]["invoice"]["invoice_number"] == "INV-API"
-    
+
     # But they should have different transaction references
     refs = {m["transaction"]["reference"] for m in duplicate_matches}
     assert "REF-123" in refs
@@ -186,7 +186,7 @@ def test_get_review_queue_success(test_client: TestClient, api_base_data: dict, 
 def test_get_review_queue_not_found(test_client: TestClient, auth_headers: tuple):
     headers, _ = auth_headers
     random_id = str(uuid.uuid4())
-    
+
     response = test_client.get(f"/api/v1/reconciliation/runs/{random_id}/queue", headers=headers)
     assert response.status_code == 404
     assert response.json()["detail"] == "Reconciliation run not found"
@@ -204,9 +204,9 @@ def test_get_review_queue_cross_firm_isolation(test_client: TestClient, db_sessi
 
     token2 = create_access_token(data={"sub": str(user2.id)})
     headers2 = {"Authorization": f"Bearer {token2}"}
-    
+
     run = api_base_data["run"]
-    
+
     response = test_client.get(f"/api/v1/reconciliation/runs/{run.id}/queue", headers=headers2)
     assert response.status_code == 403
     assert response.json()["detail"] == "Not authorized to access this run"
@@ -221,18 +221,18 @@ def test_confirm_match_success(test_client: TestClient, db_session: Session, api
     headers, _ = auth_headers
     run = api_base_data["run"]
     match_review = api_base_data["match_review"]
-    
+
     # Store initial counts
     initial_matched = run.matched_count
     initial_review = run.review_count
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers)
     assert response.status_code == 200
-    
+
     data = response.json()
     assert data["status"] == "MATCHED"
     assert data["id"] == str(match_review.id)
-    
+
     # Verify DB update and counts
     db_session.refresh(match_review)
     db_session.refresh(run)
@@ -244,29 +244,29 @@ def test_confirm_match_duplicate_and_siblings_unchanged(test_client: TestClient,
     headers, _ = auth_headers
     run = api_base_data["run"]
     match_duplicate = api_base_data["match_duplicate"] # This is match3
-    
+
     # Get sibling candidate (match4)
     sibling = db_session.query(Match).filter(
         Match.invoice_id == match_duplicate.invoice_id,
         Match.id != match_duplicate.id,
         Match.status == "DUPLICATE"
     ).first()
-    
+
     assert sibling is not None
-    
+
     initial_matched = run.matched_count
     initial_duplicate = run.duplicate_count
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{match_duplicate.id}/confirm", headers=headers)
     assert response.status_code == 200
-    
+
     # Verify DB update and counts
     db_session.refresh(match_duplicate)
     db_session.refresh(sibling)
     db_session.refresh(run)
-    
-    assert match_duplicate.status == "MATCHED"
-    assert sibling.status == "DUPLICATE" # Sibling unchanged
+
+    assert match_duplicate.status == "MATCHED"  # pyright: ignore[reportGeneralTypeIssues]
+    assert sibling.status == "DUPLICATE"  # pyright: ignore[reportGeneralTypeIssues]
     assert run.matched_count == initial_matched + 1
     assert run.duplicate_count == initial_duplicate - 1
 
@@ -274,22 +274,22 @@ def test_confirm_match_idempotent(test_client: TestClient, db_session: Session, 
     headers, _ = auth_headers
     run = api_base_data["run"]
     match_matched = api_base_data["match_matched"]
-    
+
     initial_matched = run.matched_count
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{match_matched.id}/confirm", headers=headers)
     assert response.status_code == 200
-    
+
     db_session.refresh(run)
     db_session.refresh(match_matched)
-    
+
     assert match_matched.status == "MATCHED"
     assert run.matched_count == initial_matched # Count unchanged
 
 def test_confirm_match_not_found(test_client: TestClient, auth_headers: tuple):
     headers, _ = auth_headers
     random_id = str(uuid.uuid4())
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{random_id}/confirm", headers=headers)
     assert response.status_code == 404
     assert response.json()["detail"] == "Match not found"
@@ -305,9 +305,9 @@ def test_confirm_match_cross_firm_isolation(test_client: TestClient, db_session:
 
     token2 = create_access_token(data={"sub": str(user2.id)})
     headers2 = {"Authorization": f"Bearer {token2}"}
-    
+
     match_review = api_base_data["match_review"]
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers2)
     assert response.status_code == 403
     assert response.json()["detail"] == "Not authorized to access this match"
@@ -316,25 +316,27 @@ def test_confirm_match_transaction_rollback(test_client: TestClient, db_session:
     headers, _ = auth_headers
     run = api_base_data["run"]
     match_review = api_base_data["match_review"]
-    
+
     initial_matched = run.matched_count
     initial_review = run.review_count
-    
+
     # Mock commit to fail
     import sqlalchemy.orm
     def mock_commit(*args, **kwargs):
         raise Exception("DB Error")
     monkeypatch.setattr(sqlalchemy.orm.Session, 'commit', mock_commit)
-    
+
     response = test_client.post(f"/api/v1/reconciliation/matches/{match_review.id}/confirm", headers=headers)
     assert response.status_code == 500
-    
+
     # Use a new session to verify the rollback worked
     new_session = SessionLocal()
     run_db = new_session.query(ReconciliationRun).get(run.id)
     match_db = new_session.query(Match).get(match_review.id)
-    
-    assert match_db.status == "NEEDS_REVIEW"
+
+    assert run_db is not None
+    assert match_db is not None
+    assert match_db.status == "NEEDS_REVIEW"  # pyright: ignore[reportGeneralTypeIssues]
     assert run_db.matched_count == initial_matched
     assert run_db.review_count == initial_review
     new_session.close()
@@ -387,8 +389,8 @@ def test_reject_match_duplicate_and_siblings_unchanged(test_client: TestClient, 
     db_session.refresh(sibling)
     db_session.refresh(run)
 
-    assert match_duplicate.status == "UNMATCHED"
-    assert sibling.status == "DUPLICATE" # Sibling unchanged
+    assert match_duplicate.status == "UNMATCHED"  # pyright: ignore[reportGeneralTypeIssues]
+    assert sibling.status == "DUPLICATE"  # pyright: ignore[reportGeneralTypeIssues]
     # Sibling candidate is still valid, so unmatched_count should NOT increase
     assert run.unmatched_count == initial_unmatched
     assert run.duplicate_count == initial_duplicate - 1
@@ -470,7 +472,247 @@ def test_reject_match_transaction_rollback(test_client: TestClient, db_session: 
     run_db = new_session.query(ReconciliationRun).get(run.id)
     match_db = new_session.query(Match).get(match_review.id)
 
-    assert match_db.status == "NEEDS_REVIEW"
+    assert run_db is not None
+    assert match_db is not None
+    assert match_db.status == "NEEDS_REVIEW"  # pyright: ignore[reportGeneralTypeIssues]
     assert run_db.unmatched_count == initial_unmatched
+    assert run_db.review_count == initial_review
+    new_session.close()
+
+def test_resolve_match_needs_review_success(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_review = api_base_data["match_review"]
+    invoice = match_review.invoice
+
+    initial_matched = run.matched_count
+    initial_review = run.review_count
+    initial_unmatched = run.unmatched_count
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(match_review.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(match_review)
+    db_session.refresh(run)
+
+    assert match_review.status == "MATCHED"
+    assert run.matched_count == initial_matched + 1
+    assert run.review_count == initial_review - 1
+    # Invoice was not fully UNMATCHED before, so unmatched_count is unchanged
+    assert run.unmatched_count == initial_unmatched
+
+def test_resolve_match_duplicate_success(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    # We know invoice has match1(MATCHED), match3(DUPLICATE), match4(DUPLICATE)
+
+    invoice = api_base_data["invoice"]
+    match_duplicate = db_session.query(Match).filter(
+        Match.invoice_id == invoice.id,
+        Match.status == "DUPLICATE",
+        Match.id != api_base_data["match_duplicate"].id
+    ).first()
+    assert match_duplicate is not None
+
+    # We know invoice has match1(MATCHED), match3(DUPLICATE), match4(DUPLICATE)
+
+    # Find the sibling
+    sibling = db_session.query(Match).filter(
+        Match.invoice_id == invoice.id,
+        Match.id != match_duplicate.id,
+        Match.status == "DUPLICATE"
+    ).first()
+    assert sibling is not None
+
+    # Also find match1 which is MATCHED
+    match1 = db_session.query(Match).filter(
+        Match.invoice_id == invoice.id,
+        Match.status == "MATCHED"
+    ).first()
+    assert match1 is not None
+
+    initial_matched = run.matched_count
+    initial_duplicate = run.duplicate_count
+    initial_unmatched = run.unmatched_count
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(match_duplicate.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(match_duplicate)
+    db_session.refresh(sibling)
+    db_session.refresh(match1)
+    db_session.refresh(run)
+
+    assert match_duplicate.status == "MATCHED"
+    assert sibling.status == "UNMATCHED"
+    assert match1.status == "UNMATCHED"
+
+    # Target (DUPLICATE) -> MATCHED
+    # Sibling (DUPLICATE) -> UNMATCHED
+    # Match1 (MATCHED) -> UNMATCHED
+    # matched_count: +1 (target) -1 (match1) = 0 net change
+    # duplicate_count: -1 (target) -1 (sibling) = -2
+    # unmatched_count: Invoice had viable candidates before, so 0 net change
+
+    assert run.matched_count == initial_matched
+    assert run.duplicate_count == initial_duplicate - 2
+    assert run.unmatched_count == initial_unmatched
+
+def test_resolve_idempotent(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_matched = api_base_data["match_matched"]
+    invoice = match_matched.invoice
+
+    initial_matched = run.matched_count
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(match_matched.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(run)
+    assert run.matched_count == initial_matched
+
+def test_resolve_invalid_candidate(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    invoice = api_base_data["invoice"]
+
+    # Supply a transaction ID that is not a candidate for this invoice
+    # The review vendor transaction is not a candidate for this invoice
+    transaction_review = api_base_data["match_review"].transaction
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(transaction_review.id)},
+        headers=headers
+    )
+
+    assert response.status_code == 404
+
+def test_resolve_invalid_invoice(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, _ = auth_headers
+    match_review = api_base_data["match_review"]
+
+    import uuid
+    invalid_invoice_id = uuid.uuid4()
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invalid_invoice_id}/resolve",
+        json={"transaction_id": str(match_review.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 404
+
+def test_resolve_cross_firm_isolation(test_client: TestClient, db_session: Session, api_base_data: dict):
+    from app.models.firm import Firm
+    from app.models.user import User
+    from app.core.security import create_access_token
+
+    # Create another firm and user
+    other_firm = Firm(name="Other Firm")
+    db_session.add(other_firm)
+    db_session.flush()
+
+    other_user = User(name="Other User", email="other@example.com", password_hash="pw", firm_id=other_firm.id)
+    db_session.add(other_user)
+    db_session.commit()
+
+    other_token = create_access_token(data={"sub": str(other_user.id)})
+    headers = {"Authorization": f"Bearer {other_token}"}
+
+    match_review = api_base_data["match_review"]
+    invoice = match_review.invoice
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(match_review.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 403
+
+def test_resolve_cross_client_isolation(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple):
+    headers, user = auth_headers
+    match_review = api_base_data["match_review"]
+    invoice = match_review.invoice
+
+    from app.models.client import Client
+    from app.models.transaction import Transaction
+    import datetime
+    from decimal import Decimal
+
+    # Create another client for the same firm
+    other_client = Client(name="Other Client", industry="Tech", currency="USD", firm_id=user.firm_id)
+    db_session.add(other_client)
+    db_session.flush()
+
+    other_transaction = Transaction(client_id=other_client.id, transaction_date=datetime.date(2023, 1, 5), description="Other", amount=Decimal("-200.00"), currency="USD")
+    db_session.add(other_transaction)
+    db_session.flush()
+
+    # Create a match manually pairing the invoice with this other transaction (should not happen, but checking isolation logic)
+    bad_match = Match(
+        reconciliation_run_id=api_base_data["run"].id,
+        invoice_id=invoice.id,
+        transaction_id=other_transaction.id,
+        score=Decimal("50.00"),
+        status="NEEDS_REVIEW",
+        reason="Bad Match"
+    )
+    db_session.add(bad_match)
+    db_session.commit()
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(other_transaction.id)},
+        headers=headers
+    )
+
+    assert response.status_code == 403
+
+def test_resolve_transaction_rollback(test_client: TestClient, db_session: Session, api_base_data: dict, auth_headers: tuple, monkeypatch):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match_review = api_base_data["match_review"]
+    invoice = match_review.invoice
+
+    initial_matched = run.matched_count
+    initial_review = run.review_count
+
+    # Force a failure during commit
+    original_commit = Session.commit
+    def mock_commit(*args, **kwargs):
+        raise Exception("DB Error")
+    monkeypatch.setattr("sqlalchemy.orm.Session.commit", mock_commit)
+
+    response = test_client.post(
+        f"/api/v1/reconciliation/invoices/{invoice.id}/resolve",
+        json={"transaction_id": str(match_review.transaction_id)},
+        headers=headers
+    )
+
+    assert response.status_code == 500
+
+    from app.core.database import SessionLocal
+    new_session = SessionLocal()
+    run_db = new_session.query(ReconciliationRun).get(run.id)
+    match_db = new_session.query(Match).get(match_review.id)
+
+    assert run_db is not None
+    assert match_db is not None
+    assert match_db.status == "NEEDS_REVIEW"  # pyright: ignore[reportGeneralTypeIssues]
+    assert run_db.matched_count == initial_matched
     assert run_db.review_count == initial_review
     new_session.close()

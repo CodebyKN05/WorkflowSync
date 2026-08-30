@@ -4,6 +4,9 @@ from datetime import date
 from decimal import Decimal
 import uuid
 
+class ResolveRequest(BaseModel):
+    transaction_id: uuid.UUID
+
 class InvoiceReviewResponse(BaseModel):
     id: uuid.UUID
     invoice_number: str
