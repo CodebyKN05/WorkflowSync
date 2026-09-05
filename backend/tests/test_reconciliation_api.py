@@ -922,3 +922,79 @@ def test_get_reconciliation_run_summary_nullable_completed_at(test_client, db_se
     
     assert data["id"] == str(in_progress_run.id)
     assert data["completed_at"] is None
+
+def test_get_reconciliation_run_detail_success(test_client, db_session, api_base_data, auth_headers):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    match = api_base_data["match_review"]
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs/{run.id}/detail", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Assert deterministic ordering and result mapping
+    assert len(data) >= 1
+    found = False
+    for item in data:
+        if item["id"] == str(match.id):
+            found = True
+            assert item["invoice_id"] == str(match.invoice_id)
+            assert item["transaction_id"] == str(match.transaction_id)
+            assert "score" in item
+            assert item["status"] == match.status
+            assert item["reason"] == match.reason
+    assert found
+
+def test_get_reconciliation_run_detail_not_found(test_client, auth_headers):
+    import uuid
+    headers, _ = auth_headers
+    fake_run_id = uuid.uuid4()
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs/{fake_run_id}/detail", headers=headers)
+    assert response.status_code == 404
+
+def test_get_reconciliation_run_detail_unauthorized(test_client, db_session, auth_headers):
+    from app.models.firm import Firm
+    from app.models.client import Client
+    from app.models.reconciliation_run import ReconciliationRun
+    from datetime import datetime, timezone
+    import uuid
+    headers, _ = auth_headers
+    
+    other_firm = Firm(id=uuid.uuid4(), name="Other Firm Detail")
+    db_session.add(other_firm)
+    other_firm_client = Client(id=uuid.uuid4(), name="Other Firm Client Detail", firm_id=other_firm.id, currency="USD")
+    db_session.add(other_firm_client)
+    other_run = ReconciliationRun(
+        id=uuid.uuid4(),
+        client_id=other_firm_client.id,
+        status="COMPLETED",
+        started_at=datetime.now(timezone.utc)
+    )
+    db_session.add(other_run)
+    db_session.commit()
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs/{other_run.id}/detail", headers=headers)
+    assert response.status_code == 404
+
+def test_get_reconciliation_run_detail_empty(test_client, db_session, api_base_data, auth_headers):
+    from app.models.reconciliation_run import ReconciliationRun
+    from datetime import datetime, timezone
+    import uuid
+    headers, _ = auth_headers
+    client = api_base_data["client"]
+    
+    empty_run = ReconciliationRun(
+        id=uuid.uuid4(),
+        client_id=client.id,
+        status="COMPLETED",
+        started_at=datetime.now(timezone.utc)
+    )
+    db_session.add(empty_run)
+    db_session.commit()
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs/{empty_run.id}/detail", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 0

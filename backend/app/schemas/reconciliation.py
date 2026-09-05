@@ -67,3 +67,14 @@ class ReconciliationRunSummaryResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ReconciliationDetailResponse(BaseModel):
+    id: uuid.UUID
+    invoice_id: uuid.UUID
+    transaction_id: uuid.UUID
+    score: Decimal
+    status: str
+    reason: str
+
+    class Config:
+        from_attributes = True
