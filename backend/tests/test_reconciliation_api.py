@@ -716,3 +716,73 @@ def test_resolve_transaction_rollback(test_client: TestClient, db_session: Sessi
     assert run_db.matched_count == initial_matched
     assert run_db.review_count == initial_review
     new_session.close()
+
+def test_confirm_match_persistence(test_client, db_session, api_base_data, auth_headers):
+    from app.core.database import SessionLocal
+    from app.models.match import Match
+    from app.models.reconciliation_run import ReconciliationRun
+    headers, _ = auth_headers
+    match_review = api_base_data['match_review']
+    sibling = api_base_data['match_duplicate']
+    
+    initial_sibling_status = sibling.status
+
+    response = test_client.post(f'/api/v1/reconciliation/matches/{match_review.id}/confirm', headers=headers)
+    assert response.status_code == 200
+
+    with SessionLocal() as fresh_session:
+        persisted_match = fresh_session.query(Match).filter(Match.id == match_review.id).first()
+        persisted_sibling = fresh_session.query(Match).filter(Match.id == sibling.id).first()
+        
+        assert persisted_match.status == 'MATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+        assert persisted_sibling.status == initial_sibling_status  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+
+def test_reject_match_persistence(test_client, db_session, api_base_data, auth_headers):
+    from app.core.database import SessionLocal
+    from app.models.match import Match
+    from app.models.reconciliation_run import ReconciliationRun
+    headers, _ = auth_headers
+    match_review = api_base_data['match_review']
+    sibling = api_base_data['match_duplicate']
+    
+    initial_sibling_status = sibling.status
+
+    response = test_client.post(f'/api/v1/reconciliation/matches/{match_review.id}/reject', headers=headers)
+    assert response.status_code == 200
+
+    with SessionLocal() as fresh_session:
+        persisted_match = fresh_session.query(Match).filter(Match.id == match_review.id).first()
+        persisted_sibling = fresh_session.query(Match).filter(Match.id == sibling.id).first()
+        
+        assert persisted_match.status == 'UNMATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+        assert persisted_sibling.status == initial_sibling_status  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+
+def test_resolve_persistence(test_client, db_session, api_base_data, auth_headers):
+    from app.core.database import SessionLocal
+    from app.models.match import Match
+    from app.models.reconciliation_run import ReconciliationRun
+    headers, _ = auth_headers
+    invoice = api_base_data['invoice']
+    
+    # We use match4 (another transaction) as the target, match3 (match_duplicate) is the sibling
+    target_match = db_session.query(Match).filter(
+        Match.invoice_id == invoice.id,
+        Match.status == 'DUPLICATE',
+        Match.id != api_base_data['match_duplicate'].id
+    ).first()
+    
+    sibling = api_base_data['match_duplicate']
+
+    response = test_client.post(
+        f'/api/v1/reconciliation/invoices/{invoice.id}/resolve',
+        json={'transaction_id': str(target_match.transaction_id)},  # pyright: ignore[reportOptionalMemberAccess]
+        headers=headers
+    )
+    assert response.status_code == 200
+
+    with SessionLocal() as fresh_session:
+        persisted_match = fresh_session.query(Match).filter(Match.id == target_match.id).first()  # pyright: ignore[reportOptionalMemberAccess]
+        persisted_sibling = fresh_session.query(Match).filter(Match.id == sibling.id).first()
+        
+        assert persisted_match.status == 'MATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+        assert persisted_sibling.status == 'UNMATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
