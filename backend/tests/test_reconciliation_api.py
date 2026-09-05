@@ -786,3 +786,62 @@ def test_resolve_persistence(test_client, db_session, api_base_data, auth_header
         
         assert persisted_match.status == 'MATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
         assert persisted_sibling.status == 'UNMATCHED'  # pyright: ignore[reportGeneralTypeIssues, reportOptionalMemberAccess]
+
+def test_get_reconciliation_runs_success(test_client, db_session, api_base_data, auth_headers):
+    headers, _ = auth_headers
+    run = api_base_data["run"]
+    client = api_base_data["client"]
+    
+    response = test_client.get("/api/v1/reconciliation/runs", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    
+    # Verify shape
+    run_response = next((r for r in data if r["id"] == str(run.id)), None)
+    assert run_response is not None
+    assert run_response["client_id"] == str(client.id)
+    assert run_response["status"] == run.status
+    assert "started_at" in run_response
+    assert "matched_count" in run_response
+
+def test_get_reconciliation_runs_filter_client(test_client, db_session, api_base_data, auth_headers):
+    headers, _ = auth_headers
+    client = api_base_data["client"]
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs?client_id={client.id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    assert all(r["client_id"] == str(client.id) for r in data)
+
+def test_get_reconciliation_runs_unauthorized_client(test_client, db_session, api_base_data, auth_headers):
+    from app.models.firm import Firm
+    from app.models.client import Client
+    import uuid
+    headers, _ = auth_headers
+    
+    # Create a DIFFERENT firm and client
+    other_firm = Firm(id=uuid.uuid4(), name="Other Firm")
+    db_session.add(other_firm)
+    other_firm_client = Client(id=uuid.uuid4(), name="Other Firm Client", firm_id=other_firm.id, currency="USD")
+    db_session.add(other_firm_client)
+    db_session.commit()
+    
+    # Try to get runs for that client
+    response = test_client.get(f"/api/v1/reconciliation/runs?client_id={other_firm_client.id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Should be empty because it filters by firm_id
+    assert len(data) == 0
+
+def test_get_reconciliation_runs_empty(test_client, auth_headers):
+    import uuid
+    headers, _ = auth_headers
+    fake_client_id = uuid.uuid4()
+    
+    response = test_client.get(f"/api/v1/reconciliation/runs?client_id={fake_client_id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 0

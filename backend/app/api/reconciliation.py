@@ -1,5 +1,5 @@
 import uuid
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -8,9 +8,30 @@ from app.models.user import User
 from app.models.match import Match
 from app.models.reconciliation_run import ReconciliationRun
 from app.models.client import Client
-from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest
+from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest, ReconciliationRunResponse
 
 router = APIRouter()
+
+@router.get("/runs", response_model=List[ReconciliationRunResponse])
+def get_reconciliation_runs(
+    client_id: Optional[uuid.UUID] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieves persisted reconciliation run records.
+    Filters to only runs belonging to the user's firm.
+    Optionally filters by a specific client.
+    """
+    query = db.query(ReconciliationRun).join(Client)
+    query = query.filter(Client.firm_id == current_user.firm_id)
+    
+    if client_id:
+        query = query.filter(ReconciliationRun.client_id == client_id)
+        
+    runs = query.order_by(ReconciliationRun.started_at.desc()).all()
+    return runs
+
 
 @router.get("/runs/{run_id}/queue", response_model=List[ReviewCandidateResponse])
 def get_review_queue(

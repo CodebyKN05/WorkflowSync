@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import uuid
 
@@ -36,6 +36,20 @@ class ReviewCandidateResponse(BaseModel):
     reason: str
     invoice: InvoiceReviewResponse
     transaction: TransactionReviewResponse
+
+    class Config:
+        from_attributes = True
+
+class ReconciliationRunResponse(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    matched_count: int
+    review_count: int
+    unmatched_count: int
+    duplicate_count: int
 
     class Config:
         from_attributes = True
