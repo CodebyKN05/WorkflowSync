@@ -8,7 +8,7 @@ from app.models.user import User
 from app.models.match import Match
 from app.models.reconciliation_run import ReconciliationRun
 from app.models.client import Client
-from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest, ReconciliationRunResponse
+from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest, ReconciliationRunResponse, ReconciliationRunSummaryResponse
 
 router = APIRouter()
 
@@ -31,6 +31,34 @@ def get_reconciliation_runs(
         
     runs = query.order_by(ReconciliationRun.started_at.desc()).all()
     return runs
+
+
+
+@router.get("/runs/{run_id}/summary", response_model=ReconciliationRunSummaryResponse)
+def get_reconciliation_run_summary(
+    run_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieves the summary metrics of a specific reconciliation run.
+    """
+    run = db.query(ReconciliationRun).filter(ReconciliationRun.id == run_id).first()
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconciliation run not found"
+        )
+
+    # Enforce client isolation
+    client = db.query(Client).filter(Client.id == run.client_id).first()
+    if not client or client.firm_id != current_user.firm_id:  # pyright: ignore[reportGeneralTypeIssues]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reconciliation run not found"
+        )
+
+    return run
 
 
 @router.get("/runs/{run_id}/queue", response_model=List[ReviewCandidateResponse])

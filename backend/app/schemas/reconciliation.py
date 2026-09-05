@@ -53,3 +53,17 @@ class ReconciliationRunResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ReconciliationRunSummaryResponse(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    status: str
+    matched_count: int
+    review_count: int
+    unmatched_count: int
+    duplicate_count: int
+
+    class Config:
+        from_attributes = True
