@@ -998,3 +998,139 @@ def test_get_reconciliation_run_detail_empty(test_client, db_session, api_base_d
     data = response.json()
     assert isinstance(data, list)
     assert len(data) == 0
+
+def test_historical_results_coexistence(test_client, db_session, api_base_data, auth_headers):
+    from app.models.reconciliation_run import ReconciliationRun
+    from app.models.match import Match
+    from datetime import datetime, timezone
+    import uuid
+    headers, _ = auth_headers
+    client = api_base_data["client"]
+    invoice = api_base_data["invoice"]
+    transaction = api_base_data["transaction"]
+    
+    # Run A
+    run_a = ReconciliationRun(
+        id=uuid.uuid4(),
+        client_id=client.id,
+        status="COMPLETED",
+        matched_count=1,
+        started_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 1, 1, 1, tzinfo=timezone.utc)
+    )
+    db_session.add(run_a)
+    
+    match_a = Match(
+        id=uuid.uuid4(),
+        reconciliation_run_id=run_a.id,
+        invoice_id=invoice.id,
+        transaction_id=transaction.id,
+        score=0.95,
+        status="MATCHED",
+        reason="Run A reason"
+    )
+    db_session.add(match_a)
+    
+    # Run B (newer run for the same client)
+    run_b = ReconciliationRun(
+        id=uuid.uuid4(),
+        client_id=client.id,
+        status="COMPLETED",
+        matched_count=2,
+        started_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 2, 1, 1, tzinfo=timezone.utc)
+    )
+    db_session.add(run_b)
+    
+    match_b1 = Match(
+        id=uuid.uuid4(),
+        reconciliation_run_id=run_b.id,
+        invoice_id=invoice.id,
+        transaction_id=transaction.id,
+        score=0.99,
+        status="MATCHED",
+        reason="Run B reason 1"
+    )
+    db_session.add(match_b1)
+    
+    match_b2 = Match(
+        id=uuid.uuid4(),
+        reconciliation_run_id=run_b.id,
+        invoice_id=invoice.id,
+        transaction_id=transaction.id,
+        score=0.98,
+        status="UNMATCHED",
+        reason="Run B reason 2"
+    )
+    db_session.add(match_b2)
+    db_session.commit()
+    
+    # 2. Run-record history endpoint returns both runs (Run B then Run A due to ordering)
+    res_runs = test_client.get(f"/api/v1/reconciliation/runs?client_id={client.id}", headers=headers)
+    assert res_runs.status_code == 200
+    runs_data = res_runs.json()
+    run_ids = [r["id"] for r in runs_data]
+    assert str(run_b.id) in run_ids
+    assert str(run_a.id) in run_ids
+    
+    # Check ordering if both are present in list (Run B is newer)
+    idx_b = run_ids.index(str(run_b.id))
+    idx_a = run_ids.index(str(run_a.id))
+    assert idx_b < idx_a
+    
+    # 3 & 6. Summaries for the two runs remain independently correct
+    res_sum_a = test_client.get(f"/api/v1/reconciliation/runs/{run_a.id}/summary", headers=headers)
+    assert res_sum_a.status_code == 200
+    assert res_sum_a.json()["matched_count"] == 1
+    
+    res_sum_b = test_client.get(f"/api/v1/reconciliation/runs/{run_b.id}/summary", headers=headers)
+    assert res_sum_b.status_code == 200
+    assert res_sum_b.json()["matched_count"] == 2
+    
+    # 4 & 5. Detail endpoints separate records cleanly
+    res_det_a = test_client.get(f"/api/v1/reconciliation/runs/{run_a.id}/detail", headers=headers)
+    assert res_det_a.status_code == 200
+    det_a_data = res_det_a.json()
+    assert len(det_a_data) == 1
+    assert det_a_data[0]["id"] == str(match_a.id)
+    assert det_a_data[0]["reason"] == "Run A reason"
+    
+    res_det_b = test_client.get(f"/api/v1/reconciliation/runs/{run_b.id}/detail", headers=headers)
+    assert res_det_b.status_code == 200
+    det_b_data = res_det_b.json()
+    assert len(det_b_data) == 2
+    det_b_ids = [d["id"] for d in det_b_data]
+    assert str(match_b1.id) in det_b_ids
+    assert str(match_b2.id) in det_b_ids
+
+def test_historical_results_cross_firm_isolation(test_client, db_session, auth_headers):
+    from app.models.firm import Firm
+    from app.models.client import Client
+    from app.models.reconciliation_run import ReconciliationRun
+    from app.models.match import Match
+    from datetime import datetime, timezone
+    import uuid
+    headers, _ = auth_headers
+    
+    other_firm = Firm(id=uuid.uuid4(), name="Other Firm Hist")
+    db_session.add(other_firm)
+    other_client = Client(id=uuid.uuid4(), name="Other Client Hist", firm_id=other_firm.id, currency="USD")
+    db_session.add(other_client)
+    
+    other_run = ReconciliationRun(
+        id=uuid.uuid4(),
+        client_id=other_client.id,
+        status="COMPLETED",
+        started_at=datetime.now(timezone.utc)
+    )
+    db_session.add(other_run)
+    db_session.commit()
+    
+    # 7. Historical runs from another firm remain inaccessible and return 404
+    # Check detail
+    res_det = test_client.get(f"/api/v1/reconciliation/runs/{other_run.id}/detail", headers=headers)
+    assert res_det.status_code == 404
+    
+    # Check summary
+    res_sum = test_client.get(f"/api/v1/reconciliation/runs/{other_run.id}/summary", headers=headers)
+    assert res_sum.status_code == 404
