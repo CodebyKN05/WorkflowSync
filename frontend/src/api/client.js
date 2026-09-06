@@ -17,11 +17,10 @@ export async function apiClient(endpoint, options = {}) {
     ...options.headers,
   };
 
-  // Future auth token will be injected here
-  // const token = localStorage.getItem('token');
-  // if (token) {
-  //   headers['Authorization'] = `Bearer ${token}`;
-  // }
+  const token = localStorage.getItem('token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   const config = {
     ...options,
