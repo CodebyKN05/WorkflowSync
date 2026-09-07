@@ -1,8 +1,22 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.exceptions import AppException, app_exception_handler, global_exception_handler
 
 app = FastAPI(title="WorkflowSync API")
+
+# Configure CORS
+origins = [
+    "http://localhost:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Register global error handlers
 app.add_exception_handler(AppException, app_exception_handler)
