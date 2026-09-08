@@ -29,9 +29,15 @@ export default function AppShell() {
                   </span>
                 )}
                 {selectedClient && (
-                  <span className="ml-4 text-sm font-semibold text-blue-600 hidden sm:block border-l pl-4 border-gray-300">
-                    {selectedClient.name}
-                  </span>
+                  <div className="ml-4 flex items-center space-x-6 hidden sm:flex border-l pl-4 border-gray-300">
+                    <span className="text-sm font-semibold text-blue-600">
+                      {selectedClient.name}
+                    </span>
+                    <nav className="flex space-x-4">
+                      <Link to="/" className={`text-sm font-medium ${location.pathname === '/' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Dashboard</Link>
+                      <Link to="/invoices" className={`text-sm font-medium ${location.pathname === '/invoices' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Invoices</Link>
+                    </nav>
+                  </div>
                 )}
               </div>
             </div>

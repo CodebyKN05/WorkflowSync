@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import ClientSelection from './pages/ClientSelection';
 import NotFound from './pages/NotFound';
+import Invoices from './pages/Invoices';
 import { AuthProvider } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
 
@@ -17,6 +18,7 @@ function App() {
           <Route element={<ProtectedRoute><WorkspaceProvider><AppShell /></WorkspaceProvider></ProtectedRoute>}>
             <Route path="/" element={<Home />} />
             <Route path="/clients" element={<ClientSelection />} />
+            <Route path="/invoices" element={<Invoices />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

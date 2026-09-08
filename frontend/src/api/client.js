@@ -13,9 +13,13 @@ export async function apiClient(endpoint, options = {}) {
   const url = `${BASE_URL}${endpoint}`;
   
   const headers = {
-    'Content-Type': 'application/json',
     ...options.headers,
   };
+
+  // Only set application/json if we are not sending FormData
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   const token = localStorage.getItem('token');
   if (token) {
