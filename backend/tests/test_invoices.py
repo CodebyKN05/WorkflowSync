@@ -384,3 +384,117 @@ def test_invoice_upload_extraction_failure(test_client, db_session):
     from app.models.invoice import Invoice
     count = db_session.query(Invoice).filter(Invoice.client_id == client.id).count()
     assert count == 0
+
+from datetime import date
+from decimal import Decimal
+
+def test_list_invoices_authenticated(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_list@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    from app.models.invoice import Invoice
+    invoice1 = Invoice(
+        client_id=client.id,
+        invoice_number="INV-01",
+        vendor="Vendor A",
+        invoice_date=date(2023, 10, 1),
+        due_date=date(2023, 10, 15),
+        amount=Decimal("100.00"),
+        currency="USD"
+    )
+    invoice2 = Invoice(
+        client_id=client.id,
+        invoice_number="INV-02",
+        vendor="Vendor B",
+        invoice_date=date(2023, 10, 2),
+        due_date=date(2023, 10, 16),
+        amount=Decimal("200.00"),
+        currency="USD"
+    )
+    db_session.add_all([invoice1, invoice2])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/invoices?client_id={client.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    
+    inv_response = data[0]
+    assert "id" in inv_response
+    assert "vendor" in inv_response
+    assert "amount" in inv_response
+    assert "currency" in inv_response
+    assert "invoice_date" in inv_response
+    assert "status" in inv_response
+    assert "created_at" in inv_response
+    assert "due_date" not in inv_response
+
+def test_list_invoices_empty(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_empty_list@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/invoices?client_id={client.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_list_invoices_nonexistent_client(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_missing_client@firm.com", password_hash="hash", firm_id=firm.id)
+    db_session.add(user)
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/invoices?client_id={uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 404
+
+def test_list_invoices_cross_firm_isolation(test_client, db_session):
+    firm1 = Firm(name="My Firm")
+    firm2 = Firm(name="Other Firm")
+    db_session.add_all([firm1, firm2])
+    db_session.flush()
+
+    user = User(name="Test User", email="test_cross_firm@firm.com", password_hash="hash", firm_id=firm1.id)
+    client2 = Client(name="Other Client", industry="Tech", currency="USD", firm_id=firm2.id)
+    db_session.add_all([user, client2])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/invoices?client_id={client2.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 403

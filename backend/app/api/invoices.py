@@ -9,8 +9,8 @@ from app.models.invoice import Invoice
 from app.core.exceptions import AppException
 from app.core.config import settings
 from app.services.invoice_parser import parse_invoice_text
-from app.schemas.invoice import InvoiceUploadResponse
-
+from app.schemas.invoice import InvoiceUploadResponse, InvoiceListResponse
+from typing import List
 router = APIRouter()
 
 @router.post("/upload", response_model=InvoiceUploadResponse)
@@ -125,3 +125,30 @@ def upload_invoice(
         "extracted_data": extracted_data,
         "status": db_invoice.status
     }
+
+@router.get("", response_model=List[InvoiceListResponse])
+def list_invoices(
+    client_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify client ownership through firm association
+    client = db.query(Client).filter(Client.id == client_id).first()
+
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Client not found"
+        )
+
+    if client.firm_id != current_user.firm_id:  # pyright: ignore[reportGeneralTypeIssues]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this client"
+        )
+
+    invoices = db.query(Invoice).filter(
+        Invoice.client_id == client_id
+    ).order_by(Invoice.created_at.desc()).all()
+
+    return invoices

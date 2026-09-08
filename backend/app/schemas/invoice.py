@@ -20,3 +20,14 @@ class InvoiceUploadResponse(BaseModel):
     extracted_text: str
     extracted_data: InvoiceExtractedData
     status: str
+
+from datetime import datetime
+
+class InvoiceListResponse(BaseModel):
+    id: uuid.UUID
+    vendor: str
+    amount: Decimal
+    currency: str
+    invoice_date: date
+    status: str
+    created_at: datetime
