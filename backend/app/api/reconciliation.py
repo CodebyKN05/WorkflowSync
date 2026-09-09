@@ -8,9 +8,52 @@ from app.models.user import User
 from app.models.match import Match
 from app.models.reconciliation_run import ReconciliationRun
 from app.models.client import Client
-from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest, ReconciliationRunResponse, ReconciliationRunSummaryResponse, ReconciliationDetailResponse
+from app.models.invoice import Invoice
+from app.models.transaction import Transaction
+from app.services.reconciliation_engine import run_reconciliation
+from app.schemas.reconciliation import ReviewCandidateResponse, ResolveRequest, ReconciliationRunResponse, ReconciliationRunSummaryResponse, ReconciliationDetailResponse, ReconciliationRunRequest
 
 router = APIRouter()
+
+@router.post("/run", response_model=ReconciliationRunResponse, status_code=status.HTTP_201_CREATED)
+def trigger_reconciliation_run(
+    request: ReconciliationRunRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Triggers a new reconciliation run for a specific client.
+    """
+    # 1. Look up the requested Client
+    client = db.query(Client).filter(Client.id == request.client_id).first()
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Client not found"
+        )
+
+    # 2. Enforce firm isolation
+    if client.firm_id != current_user.firm_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this client"
+        )
+
+    # 3. Fetch client-scoped ORM collections
+    invoices = db.query(Invoice).filter(Invoice.client_id == request.client_id).all()
+    transactions = db.query(Transaction).filter(Transaction.client_id == request.client_id).all()
+
+    # 4. Pass exact client-scoped collections into engine
+    try:
+        run = run_reconciliation(db, request.client_id, invoices, transactions)
+        return run
+    except Exception as e:
+        # Unexpected engine failure
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to run reconciliation"
+        )
+
 
 @router.get("/runs", response_model=List[ReconciliationRunResponse])
 def get_reconciliation_runs(

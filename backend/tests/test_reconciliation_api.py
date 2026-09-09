@@ -1134,3 +1134,118 @@ def test_historical_results_cross_firm_isolation(test_client, db_session, auth_h
     # Check summary
     res_sum = test_client.get(f"/api/v1/reconciliation/runs/{other_run.id}/summary", headers=headers)
     assert res_sum.status_code == 404
+
+def test_trigger_reconciliation_success(test_client, db_session, api_base_data, auth_headers):
+    headers, _ = auth_headers
+    client = api_base_data["client"]
+    
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(client.id)}, headers=headers)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["client_id"] == str(client.id)
+    assert data["status"] == "completed"
+    assert "id" in data
+    
+    # Verify persistence
+    from app.models.reconciliation_run import ReconciliationRun
+    run = db_session.query(ReconciliationRun).filter(ReconciliationRun.id == data["id"]).first()
+    assert run is not None
+    assert str(run.client_id) == str(client.id)
+
+def test_trigger_reconciliation_firm_isolation(test_client, db_session, auth_headers):
+    headers, _ = auth_headers
+    from app.models.firm import Firm
+    from app.models.client import Client
+    import uuid
+    
+    other_firm = Firm(name="Trigger Other Firm")
+    db_session.add(other_firm)
+    db_session.flush()
+    other_client = Client(name="Trigger Other Client", firm_id=other_firm.id, currency="USD")
+    db_session.add(other_client)
+    db_session.commit()
+    
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(other_client.id)}, headers=headers)
+    assert response.status_code == 403
+    
+    from app.models.reconciliation_run import ReconciliationRun
+    runs = db_session.query(ReconciliationRun).filter(ReconciliationRun.client_id == other_client.id).all()
+    assert len(runs) == 0
+
+def test_trigger_reconciliation_unauthenticated(test_client, api_base_data):
+    client = api_base_data["client"]
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(client.id)})
+    assert response.status_code == 401
+
+def test_trigger_reconciliation_empty_state(test_client, db_session, auth_headers):
+    headers, user = auth_headers
+    from app.models.client import Client
+    
+    empty_client = Client(name="Empty Client", firm_id=user.firm_id, currency="USD")
+    db_session.add(empty_client)
+    db_session.commit()
+    
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(empty_client.id)}, headers=headers)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["matched_count"] == 0
+    assert data["unmatched_count"] == 0
+    
+def test_trigger_reconciliation_client_scoped_isolation(test_client, db_session, auth_headers):
+    headers, user = auth_headers
+    from app.models.client import Client
+    from app.models.invoice import Invoice
+    from app.models.transaction import Transaction
+    from datetime import date
+    from decimal import Decimal
+    
+    client_a = Client(name="Client A", firm_id=user.firm_id, currency="USD")
+    client_b = Client(name="Client B", firm_id=user.firm_id, currency="USD")
+    db_session.add_all([client_a, client_b])
+    db_session.flush()
+    
+    # Client A data
+    inv_a = Invoice(client_id=client_a.id, invoice_number="A1", vendor="V1", invoice_date=date(2023,1,1), due_date=date(2023,1,31), amount=Decimal("100"), currency="USD")
+    txn_a = Transaction(client_id=client_a.id, transaction_date=date(2023,1,1), description="V1", amount=Decimal("-100"), currency="USD")
+    
+    # Client B data (identical amounts, could mistakenly match A if leaked)
+    inv_b = Invoice(client_id=client_b.id, invoice_number="B1", vendor="V1", invoice_date=date(2023,1,1), due_date=date(2023,1,31), amount=Decimal("100"), currency="USD")
+    txn_b = Transaction(client_id=client_b.id, transaction_date=date(2023,1,1), description="V1", amount=Decimal("-100"), currency="USD")
+    
+    db_session.add_all([inv_a, txn_a, inv_b, txn_b])
+    db_session.commit()
+    
+    # Trigger A
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(client_a.id)}, headers=headers)
+    assert response.status_code == 201
+    data = response.json()
+    
+    # A should match its own 1 pair
+    assert data["matched_count"] == 1
+    assert data["unmatched_count"] == 0
+    
+    # Check the actual DB match to ensure it didn't match B's transaction
+    from app.models.match import Match
+    matches = db_session.query(Match).filter(Match.reconciliation_run_id == data["id"]).all()
+    assert len(matches) == 1
+    assert matches[0].invoice_id == inv_a.id
+    assert matches[0].transaction_id == txn_a.id
+
+def test_trigger_reconciliation_engine_failure(test_client, db_session, api_base_data, auth_headers, monkeypatch):
+    headers, _ = auth_headers
+    client = api_base_data["client"]
+    
+    # Mock run_reconciliation to raise Exception
+    import app.api.reconciliation
+    def mock_run(*args, **kwargs):
+        raise Exception("Engine failed")
+    monkeypatch.setattr(app.api.reconciliation, "run_reconciliation", mock_run)
+    
+    response = test_client.post("/api/v1/reconciliation/run", json={"client_id": str(client.id)}, headers=headers)
+    assert response.status_code == 500
+    
+    # No partial runs since engine failed
+    from app.models.reconciliation_run import ReconciliationRun
+    runs = db_session.query(ReconciliationRun).filter(ReconciliationRun.client_id == client.id).all()
+    # base_data already has 1 run, ensure there is only 1
+    assert len(runs) == 1
