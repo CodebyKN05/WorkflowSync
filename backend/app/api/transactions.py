@@ -10,6 +10,8 @@ from app.core.config import settings
 from app.services.transaction_parser import parse_transaction_csv
 from app.services.transaction_validator import validate_parsed_transactions
 from app.services.transaction_normalizer import normalize_transactions
+from app.schemas.transaction import TransactionListResponse
+from typing import List
 
 router = APIRouter()
 
@@ -83,3 +85,33 @@ def upload_transaction_csv(
         "message": "Bank CSV upload accepted and transactions persisted.",
         "transactions_created": len(db_transactions)
     }
+
+@router.get("", response_model=List[TransactionListResponse])
+def list_transactions(
+    client_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Verify client ownership through firm association
+    client = db.query(Client).filter(Client.id == client_id).first()
+
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Client not found"
+        )
+
+    if client.firm_id != current_user.firm_id:  # pyright: ignore[reportGeneralTypeIssues]
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this client"
+        )
+
+    transactions = db.query(Transaction).filter(
+        Transaction.client_id == client_id
+    ).order_by(
+        Transaction.transaction_date.desc(),
+        Transaction.created_at.desc()
+    ).all()
+
+    return transactions

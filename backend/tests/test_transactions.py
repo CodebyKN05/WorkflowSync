@@ -272,3 +272,139 @@ def test_transaction_csv_upload_persistence_failure(test_client, db_session, mon
 
     assert response.status_code == 500
     assert response.json()['detail'] == 'Failed to persist transactions to database.'
+
+from datetime import date
+from decimal import Decimal
+
+def test_list_transactions_authenticated(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_list@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    from app.models.transaction import Transaction
+    import time
+    
+    tx1 = Transaction(
+        client_id=client.id,
+        transaction_date=date(2023, 10, 1),
+        description="Vendor A",
+        amount=Decimal("100.00"),
+        currency="USD"
+    )
+    db_session.add(tx1)
+    db_session.commit()
+    time.sleep(0.01) # ensure different created_at
+    
+    tx2 = Transaction(
+        client_id=client.id,
+        transaction_date=date(2023, 10, 2),
+        description="Vendor B",
+        amount=Decimal("200.00"),
+        currency="USD"
+    )
+    db_session.add(tx2)
+    db_session.commit()
+    time.sleep(0.01) # ensure different created_at
+    
+    tx3 = Transaction(
+        client_id=client.id,
+        transaction_date=date(2023, 10, 2), # Same date as tx2 to test created_at tie-breaker
+        description="Vendor C",
+        amount=Decimal("300.00"),
+        currency="USD"
+    )
+    db_session.add(tx3)
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/transactions?client_id={client.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 3
+    
+    # Ordering: transaction_date DESC, created_at DESC
+    # tx3 and tx2 have same date (Oct 2), tx3 created later -> tx3 first, tx2 second
+    # tx1 is Oct 1 -> tx1 third
+    assert data[0]["id"] == str(tx3.id)
+    assert data[1]["id"] == str(tx2.id)
+    assert data[2]["id"] == str(tx1.id)
+    
+    tx_response = data[0]
+    assert "id" in tx_response
+    assert "description" in tx_response
+    assert "amount" in tx_response
+    assert "currency" in tx_response
+    assert "transaction_date" in tx_response
+    assert "reference" in tx_response
+    assert "source_file" in tx_response
+    assert "created_at" in tx_response
+    # Assert no extraneous fields
+    assert "status" not in tx_response 
+
+def test_list_transactions_empty(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_empty_list@firm.com", password_hash="hash", firm_id=firm.id)
+    client = Client(name="Test Client", industry="Tech", currency="USD", firm_id=firm.id)
+    db_session.add_all([user, client])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/transactions?client_id={client.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+def test_list_transactions_nonexistent_client(test_client, db_session):
+    firm = Firm(name="Test Firm")
+    db_session.add(firm)
+    db_session.flush()
+
+    user = User(name="Test User", email="test_missing_client@firm.com", password_hash="hash", firm_id=firm.id)
+    db_session.add(user)
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/transactions?client_id={uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 404
+
+def test_list_transactions_cross_firm_isolation(test_client, db_session):
+    firm1 = Firm(name="My Firm")
+    firm2 = Firm(name="Other Firm")
+    db_session.add_all([firm1, firm2])
+    db_session.flush()
+
+    user = User(name="Test User", email="test_cross_firm@firm.com", password_hash="hash", firm_id=firm1.id)
+    client2 = Client(name="Other Client", industry="Tech", currency="USD", firm_id=firm2.id)
+    db_session.add_all([user, client2])
+    db_session.commit()
+
+    token = create_access_token(data={"sub": str(user.id)})
+
+    response = test_client.get(
+        f"/api/v1/transactions?client_id={client2.id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 403
