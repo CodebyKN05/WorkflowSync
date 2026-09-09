@@ -257,3 +257,140 @@ def test_persist_rollback_on_failure(db_session, base_data):
 
     matches = db_session.query(Match).join(ReconciliationRun).filter(ReconciliationRun.client_id == client.id).count()
     assert matches == 0
+
+def test_persist_reconciliation_with_exceptions(db_session):
+    firm = Firm(name="Persist Firm")
+    client = Client(name="Persist Client", currency="USD")
+    firm.clients.append(client)
+    db_session.add(firm)
+    db_session.flush()
+
+    from app.models.exception import ReconciliationException
+    exceptions = [
+        ReconciliationException(
+            type="DUMMY_ERROR",
+            description="Dummy 1",
+            status="OPEN"
+        ),
+        ReconciliationException(
+            type="DUMMY_ERROR_2",
+            description="Dummy 2",
+            status="OPEN"
+        )
+    ]
+
+    run = persist_reconciliation_run(
+        db=db_session,
+        client_id=client.id,
+        match_results=[],
+        unmatched_invoice_count=0,
+        exceptions=exceptions
+    )
+
+    # B. Exception persistence
+    assert run.id is not None
+    db_session.refresh(run)
+    assert len(run.exceptions) == 2
+    assert run.exceptions[0].reconciliation_run_id == run.id
+    assert run.exceptions[1].reconciliation_run_id == run.id
+
+def test_persist_repeated_run_isolation(db_session):
+    firm = Firm(name="Repeated Firm")
+    client = Client(name="Repeated Client", currency="USD")
+    firm.clients.append(client)
+    db_session.add(firm)
+    db_session.flush()
+
+    from app.models.exception import ReconciliationException
+    exc1 = ReconciliationException(type="RUN_A_EXC", description="A", status="OPEN")
+    exc2 = ReconciliationException(type="RUN_B_EXC", description="B", status="OPEN")
+
+    run_a = persist_reconciliation_run(
+        db=db_session,
+        client_id=client.id,
+        match_results=[],
+        exceptions=[exc1]
+    )
+
+    run_b = persist_reconciliation_run(
+        db=db_session,
+        client_id=client.id,
+        match_results=[],
+        exceptions=[exc2]
+    )
+
+    db_session.refresh(run_a)
+    db_session.refresh(run_b)
+
+    # C. Repeated-run isolation
+    assert len(run_a.exceptions) == 1
+    assert run_a.exceptions[0].type == "RUN_A_EXC"
+    
+    assert len(run_b.exceptions) == 1
+    assert run_b.exceptions[0].type == "RUN_B_EXC"
+
+def test_persist_rollback_on_exception_failure(db_session):
+    firm = Firm(name="Rollback Firm")
+    client = Client(name="Rollback Client", currency="USD")
+    firm.clients.append(client)
+    db_session.add(firm)
+    db_session.flush()
+
+    from app.models.exception import ReconciliationException
+    # Setting an invalid/non-existent foreign key to force integrity error
+    bad_exc = ReconciliationException(
+        type="BAD_EXC",
+        description="Bad",
+        status="OPEN",
+        invoice_id=uuid.uuid4() # Fails integrity
+    )
+
+    with pytest.raises(Exception):
+        persist_reconciliation_run(
+            db=db_session,
+            client_id=client.id,
+            match_results=[],
+            exceptions=[bad_exc]
+        )
+
+    # D. Rollback verification
+    runs = db_session.query(ReconciliationRun).filter(ReconciliationRun.client_id == client.id).count()
+    assert runs == 0
+
+    exceptions_in_db = db_session.query(ReconciliationException).filter(ReconciliationException.description == "Bad").count()
+    # It should not persist the bad exception
+    assert exceptions_in_db == 0
+
+def test_persist_regression_zero_exceptions(db_session):
+    firm = Firm(name="Regression Firm")
+    client = Client(name="Regression Client", currency="USD")
+    firm.clients.append(client)
+    db_session.add(firm)
+    db_session.flush()
+
+    invoice = Invoice(client_id=client.id, invoice_number="INV1", vendor="V1", invoice_date=date(2023,1,1), due_date=date(2023,1,31), amount=Decimal("100"), currency="USD")
+    transaction = Transaction(client_id=client.id, transaction_date=date(2023,1,1), description="V1", amount=Decimal("-100"), currency="USD")
+    db_session.add_all([invoice, transaction])
+    db_session.flush()
+
+    match_data = [
+        MatchData(
+            invoice_id=invoice.id,
+            transaction_id=transaction.id,
+            confidence_result=ConfidenceScoreResult(total_score=Decimal("100.0")),
+            classification_result=ClassificationResult(category=ResultCategory.MATCHED),
+            explanation_result=ExplanationResult(reasons=["Test"])
+        )
+    ]
+
+    # E. Regression (calling without exceptions parameter)
+    run = persist_reconciliation_run(
+        db=db_session,
+        client_id=client.id,
+        match_results=match_data
+    )
+
+    db_session.refresh(run)
+    assert run.matched_count == 1
+    assert len(run.matches) == 1
+    assert len(run.exceptions) == 0

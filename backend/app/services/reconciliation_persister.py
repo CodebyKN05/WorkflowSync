@@ -1,11 +1,12 @@
 import uuid
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models.reconciliation_run import ReconciliationRun
 from app.models.match import Match
+from app.models.exception import ReconciliationException
 from app.services.confidence_scorer import ConfidenceScoreResult
 from app.services.result_classifier import ClassificationResult, ResultCategory
 from app.services.explainability_service import ExplanationResult
@@ -23,7 +24,8 @@ def persist_reconciliation_run(
     db: Session,
     client_id: uuid.UUID,
     match_results: List[MatchData],
-    unmatched_invoice_count: int = 0
+    unmatched_invoice_count: int = 0,
+    exceptions: Optional[List[ReconciliationException]] = None
 ) -> ReconciliationRun:
     """
     Persists a new reconciliation run and its associated matches.
@@ -85,6 +87,12 @@ def persist_reconciliation_run(
             db_matches.append(db_match)
 
         db.add_all(db_matches)
+
+        if exceptions:
+            for exc in exceptions:
+                exc.reconciliation_run_id = run.id
+            db.add_all(exceptions)
+
         db.commit()
         db.refresh(run)
     except Exception as e:

@@ -37,9 +37,9 @@ def test_exception_metadata():
     assert "invoice_id" in columns
     assert "transaction_id" in columns
     assert "type" in columns
-    assert "description" in columns
     assert "status" in columns
     assert "created_at" in columns
+    assert "reconciliation_run_id" in columns
     assert "client_id" not in columns
     
     assert columns["invoice_id"].nullable is True
@@ -71,15 +71,24 @@ def create_base_entities(db_session):
         amount=-100.00,
         currency="USD"
     )
+    from app.models.reconciliation_run import ReconciliationRun
+    from datetime import datetime, timezone
+    run = ReconciliationRun(
+        client_id=client.id,
+        status="completed",
+        started_at=datetime.now(timezone.utc)
+    )
     db_session.add(invoice)
     db_session.add(transaction)
+    db_session.add(run)
     db_session.flush()
-    return invoice, transaction
+    return invoice, transaction, run
 
 def test_exception_invoice_only_persistence(db_session):
-    invoice, _ = create_base_entities(db_session)
+    invoice, _, run = create_base_entities(db_session)
     
     exc = ReconciliationException(
+        reconciliation_run_id=run.id,
         invoice_id=invoice.id,
         type="MISSING_PAYMENT",
         description="Invoice has no matching payment",
@@ -95,9 +104,10 @@ def test_exception_invoice_only_persistence(db_session):
     assert exc.type == "MISSING_PAYMENT"
 
 def test_exception_transaction_only_persistence(db_session):
-    _, transaction = create_base_entities(db_session)
+    _, transaction, run = create_base_entities(db_session)
     
     exc = ReconciliationException(
+        reconciliation_run_id=run.id,
         transaction_id=transaction.id,
         type="UNRELATED_TRANSACTION",
         description="Transaction has no matching invoice",
@@ -113,9 +123,10 @@ def test_exception_transaction_only_persistence(db_session):
     assert exc.type == "UNRELATED_TRANSACTION"
 
 def test_exception_both_references(db_session):
-    invoice, transaction = create_base_entities(db_session)
+    invoice, transaction, run = create_base_entities(db_session)
     
     exc = ReconciliationException(
+        reconciliation_run_id=run.id,
         invoice_id=invoice.id,
         transaction_id=transaction.id,
         type="AMOUNT_MISMATCH",
@@ -135,9 +146,10 @@ def test_exception_both_references(db_session):
     ("status", None),
 ])
 def test_exception_requires_fields(db_session, field, value):
-    invoice, _ = create_base_entities(db_session)
+    invoice, _, run = create_base_entities(db_session)
     
     valid_data = {
+        "reconciliation_run_id": run.id,
         "invoice_id": invoice.id,
         "type": "MISSING_PAYMENT",
         "description": "Invoice has no matching payment",
@@ -153,9 +165,10 @@ def test_exception_requires_fields(db_session, field, value):
     db_session.rollback()
 
 def test_exception_invoice_relationship(db_session):
-    invoice, _ = create_base_entities(db_session)
+    invoice, _, run = create_base_entities(db_session)
     
     exc = ReconciliationException(
+        reconciliation_run_id=run.id,
         invoice_id=invoice.id,
         type="MISSING_PAYMENT",
         description="Invoice has no matching payment",
@@ -169,9 +182,10 @@ def test_exception_invoice_relationship(db_session):
     assert exc.invoice.id == invoice.id
 
 def test_exception_transaction_relationship(db_session):
-    _, transaction = create_base_entities(db_session)
+    _, transaction, run = create_base_entities(db_session)
     
     exc = ReconciliationException(
+        reconciliation_run_id=run.id,
         transaction_id=transaction.id,
         type="UNRELATED_TRANSACTION",
         description="Transaction has no matching invoice",
@@ -183,3 +197,19 @@ def test_exception_transaction_relationship(db_session):
     assert len(cast(list[ReconciliationException], transaction.exceptions)) == 1
     assert transaction.exceptions[0].type == "UNRELATED_TRANSACTION"
     assert exc.transaction.id == transaction.id
+
+def test_exception_run_relationship(db_session):
+    _, _, run = create_base_entities(db_session)
+    
+    exc = ReconciliationException(
+        reconciliation_run_id=run.id,
+        type="MISSING_DATA",
+        description="Missing data",
+        status="OPEN"
+    )
+    db_session.add(exc)
+    db_session.commit()
+    
+    assert len(cast(list[ReconciliationException], run.exceptions)) == 1
+    assert run.exceptions[0].type == "MISSING_DATA"
+    assert exc.reconciliation_run.id == run.id

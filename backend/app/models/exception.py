@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.invoice import Invoice
     from app.models.transaction import Transaction
+    from app.models.reconciliation_run import ReconciliationRun
 
 class ReconciliationException(Base):
     __tablename__ = "exceptions"
 
     id = Column(Uuid, primary_key=True, index=True, default=uuid.uuid4)
+    reconciliation_run_id = Column(Uuid, ForeignKey("reconciliation_runs.id"), nullable=False)
     invoice_id = Column(Uuid, ForeignKey("invoices.id"), nullable=True)
     transaction_id = Column(Uuid, ForeignKey("transactions.id"), nullable=True)
     type = Column(String(50), nullable=False)
@@ -20,5 +22,7 @@ class ReconciliationException(Base):
     status = Column(String(50), nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    reconciliation_run: Mapped["ReconciliationRun"] = relationship("ReconciliationRun", back_populates="exceptions")
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="exceptions")
     transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="exceptions")
+
