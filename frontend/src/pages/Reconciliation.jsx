@@ -4,6 +4,7 @@ import { reconciliationApi } from '../api/reconciliation';
 import ReconciliationSummary from '../components/ReconciliationSummary';
 import ReconciliationResults from '../components/ReconciliationResults';
 import ReconciliationQueue from '../components/ReconciliationQueue';
+import ReconciliationHistory from '../components/ReconciliationHistory';
 
 export default function Reconciliation() {
   const { selectedClient } = useWorkspace();
@@ -12,6 +13,7 @@ export default function Reconciliation() {
   const [error, setError] = useState(null);
   
   const [latestRun, setLatestRun] = useState(null);
+  const [allRuns, setAllRuns] = useState([]);
   const [summary, setSummary] = useState(null);
   const [results, setResults] = useState([]);
   const [queue, setQueue] = useState([]);
@@ -24,23 +26,25 @@ export default function Reconciliation() {
       clearState();
       return;
     }
-    fetchLatestRun(selectedClient.id);
+    fetchRuns(selectedClient.id);
   }, [selectedClient]);
 
   const clearState = () => {
     setLatestRun(null);
+    setAllRuns([]);
     setSummary(null);
     setResults([]);
     setQueue([]);
     setError(null);
   };
 
-  const fetchLatestRun = async (clientId) => {
+  const fetchRuns = async (clientId) => {
     setLoading(true);
     setError(null);
     try {
       const runs = await reconciliationApi.getRuns(clientId);
       if (runs && runs.length > 0) {
+        setAllRuns(runs);
         const firstRun = runs[0]; // Newest first
         setLatestRun(firstRun);
         await fetchRunData(firstRun.id);
@@ -78,7 +82,9 @@ export default function Reconciliation() {
     setError(null);
     try {
       const newRun = await reconciliationApi.triggerRun(selectedClient.id);
+      setAllRuns(prev => [newRun, ...prev]);
       setLatestRun(newRun);
+      setActiveTab('QUEUE');
       await fetchRunData(newRun.id);
     } catch (err) {
       console.error(err);
@@ -86,6 +92,12 @@ export default function Reconciliation() {
     } finally {
       setRunning(false);
     }
+  };
+
+  const handleSelectRun = async (run) => {
+    setLatestRun(run);
+    setActiveTab('QUEUE');
+    await fetchRunData(run.id);
   };
 
   if (!selectedClient) {
@@ -116,7 +128,7 @@ export default function Reconciliation() {
         <div className="mb-6 bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md text-sm flex justify-between items-center">
           <span>{error}</span>
           <button 
-            onClick={() => fetchLatestRun(selectedClient.id)} 
+            onClick={() => fetchRuns(selectedClient.id)} 
             className="text-red-700 underline font-medium hover:text-red-900"
           >
             Retry
@@ -156,6 +168,16 @@ export default function Reconciliation() {
               >
                 Results Ledger
               </button>
+              <button
+                onClick={() => setActiveTab('HISTORY')}
+                className={`${
+                  activeTab === 'HISTORY'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              >
+                Run History
+              </button>
             </nav>
           </div>
 
@@ -165,8 +187,14 @@ export default function Reconciliation() {
               onRefresh={fetchRunData} 
               runId={latestRun.id} 
             />
-          ) : (
+          ) : activeTab === 'RESULTS' ? (
             <ReconciliationResults results={results} />
+          ) : (
+            <ReconciliationHistory 
+              runs={allRuns} 
+              activeRunId={latestRun.id} 
+              onSelectRun={handleSelectRun} 
+            />
           )}
         </>
       )}
