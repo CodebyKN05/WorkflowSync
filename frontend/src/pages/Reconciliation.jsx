@@ -3,6 +3,7 @@ import { useWorkspace } from '../context/WorkspaceContext';
 import { reconciliationApi } from '../api/reconciliation';
 import ReconciliationSummary from '../components/ReconciliationSummary';
 import ReconciliationResults from '../components/ReconciliationResults';
+import ReconciliationQueue from '../components/ReconciliationQueue';
 
 export default function Reconciliation() {
   const { selectedClient } = useWorkspace();
@@ -13,6 +14,9 @@ export default function Reconciliation() {
   const [latestRun, setLatestRun] = useState(null);
   const [summary, setSummary] = useState(null);
   const [results, setResults] = useState([]);
+  const [queue, setQueue] = useState([]);
+  
+  const [activeTab, setActiveTab] = useState('QUEUE');
 
   // Fetch runs on mount or when selectedClient changes
   useEffect(() => {
@@ -27,6 +31,7 @@ export default function Reconciliation() {
     setLatestRun(null);
     setSummary(null);
     setResults([]);
+    setQueue([]);
     setError(null);
   };
 
@@ -53,12 +58,14 @@ export default function Reconciliation() {
 
   const fetchRunData = async (runId) => {
     try {
-      const [sumData, detData] = await Promise.all([
+      const [sumData, detData, queueData] = await Promise.all([
         reconciliationApi.getRunSummary(runId),
-        reconciliationApi.getRunDetail(runId)
+        reconciliationApi.getRunDetail(runId),
+        reconciliationApi.getQueue(runId)
       ]);
       setSummary(sumData);
       setResults(detData);
+      setQueue(queueData);
     } catch (err) {
       console.error(err);
       setError('Failed to fetch details for the latest run.');
@@ -126,7 +133,41 @@ export default function Reconciliation() {
       ) : (
         <>
           <ReconciliationSummary summary={summary} />
-          <ReconciliationResults results={results} />
+
+          <div className="mb-4 border-b border-gray-200">
+            <nav className="-mb-px flex space-x-8">
+              <button
+                onClick={() => setActiveTab('QUEUE')}
+                className={`${
+                  activeTab === 'QUEUE'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              >
+                Review Queue
+              </button>
+              <button
+                onClick={() => setActiveTab('RESULTS')}
+                className={`${
+                  activeTab === 'RESULTS'
+                    ? 'border-blue-500 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                } whitespace-nowrap pb-4 px-1 border-b-2 font-medium text-sm`}
+              >
+                Results Ledger
+              </button>
+            </nav>
+          </div>
+
+          {activeTab === 'QUEUE' ? (
+            <ReconciliationQueue 
+              queue={queue} 
+              onRefresh={fetchRunData} 
+              runId={latestRun.id} 
+            />
+          ) : (
+            <ReconciliationResults results={results} />
+          )}
         </>
       )}
     </div>
