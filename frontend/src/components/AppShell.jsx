@@ -37,6 +37,7 @@ export default function AppShell() {
                       <Link to="/" className={`text-sm font-medium ${location.pathname === '/' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Dashboard</Link>
                       <Link to="/invoices" className={`text-sm font-medium ${location.pathname === '/invoices' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Invoices</Link>
                       <Link to="/transactions" className={`text-sm font-medium ${location.pathname === '/transactions' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Transactions</Link>
+                      <Link to="/reconciliation" className={`text-sm font-medium ${location.pathname === '/reconciliation' ? 'text-gray-900 border-b-2 border-gray-900' : 'text-gray-500 hover:text-gray-900'}`}>Reconciliation</Link>
                     </nav>
                   </div>
                 )}

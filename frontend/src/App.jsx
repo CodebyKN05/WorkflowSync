@@ -7,6 +7,7 @@ import ClientSelection from './pages/ClientSelection';
 import NotFound from './pages/NotFound';
 import Invoices from './pages/Invoices';
 import Transactions from './pages/Transactions';
+import Reconciliation from './pages/Reconciliation';
 import { AuthProvider } from './context/AuthContext';
 import { WorkspaceProvider } from './context/WorkspaceContext';
 
@@ -21,6 +22,7 @@ function App() {
             <Route path="/clients" element={<ClientSelection />} />
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/transactions" element={<Transactions />} />
+            <Route path="/reconciliation" element={<Reconciliation />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
